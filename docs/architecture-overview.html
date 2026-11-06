@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>超级 Agent 架构概览 · dsh-superagent</title>
-<meta name="description" content="dsh-superagent 的可视化架构概览：来源接入、授权研判、工单执行与结果交付。">
+<meta name="description" content="dsh-superagent 的可视化架构概览：来源接入、授权研判、工单执行、结果交付，以及 Session / Router / Worker 的工作循环。">
 <script>
 (function () {
   var d = document.documentElement;
@@ -398,6 +398,48 @@
   .state-pill.blocked i, .state-pill.failed i { background: var(--rose); }
   .state-pill.dropped i { background: var(--faint); }
 
+  /* ---------- runtime diagrams ---------- */
+  .diagram-card {
+    margin: 0 0 16px; padding: 24px 26px 16px;
+    background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius);
+  }
+  .diagram-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 24px; }
+  .diagram-kicker { margin: 0 0 4px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; color: var(--accent); }
+  .diagram-head h3 { margin: 0; font-size: 18px; letter-spacing: -.01em; }
+  .diagram-head p { margin: 5px 0 0; max-width: 76ch; font-size: 12.5px; line-height: 1.55; color: var(--muted); }
+  .diagram-scroll { margin: 8px -6px 0; padding: 4px 6px 6px; overflow-x: auto; scrollbar-width: thin; }
+  .diagram { width: 100%; min-width: 760px; height: auto; }
+  .diagram text { font-family: var(--sans); }
+  .dg-frame { fill: var(--surface-2); stroke: var(--line); stroke-width: 1; stroke-dasharray: 6 5; }
+  .dg-box { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.1; }
+  .dg-box.blue { fill: var(--blue-soft); stroke: var(--blue); }
+  .dg-box.amber { fill: var(--amber-soft); stroke: var(--amber); }
+  .dg-box.accent { fill: var(--accent-soft); stroke: var(--accent); }
+  .dg-box.violet { fill: var(--violet-soft); stroke: var(--violet); }
+  .dg-kicker { font-family: var(--mono); font-size: 9px; letter-spacing: .12em; }
+  .dg-kicker.blue { fill: var(--blue); }
+  .dg-kicker.amber { fill: var(--amber); }
+  .dg-kicker.accent { fill: var(--accent-ink); }
+  .dg-kicker.violet { fill: var(--violet); }
+  .dg-kicker.plain { fill: var(--muted); }
+  .dg-title { fill: var(--ink); font-size: 14.5px; font-weight: 650; letter-spacing: -.01em; }
+  .dg-sub { fill: var(--ink-2); font-size: 10.5px; }
+  .dg-faint { fill: var(--muted); font-size: 10.5px; }
+  .dg-mono { fill: var(--muted); font-family: var(--mono); font-size: 9.5px; }
+  .dg-label { fill: var(--muted); font-family: var(--mono); font-size: 9.5px; }
+  .dg-label.accent { fill: var(--accent-ink); }
+  .dg-arrow { fill: none; stroke: var(--muted); stroke-width: 1.2; }
+  .dg-arrow.accent { stroke: var(--accent); }
+  .dg-head { fill: var(--muted); }
+  .dg-head.accent { fill: var(--accent); }
+  .diagram-foot { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-top: 8px; padding-top: 10px; border-top: 1px dashed var(--line); font-size: 11.5px; line-height: 1.55; color: var(--muted); }
+  .diagram-foot .detail-link:first-of-type { margin-left: auto; }
+  .detail-link { border: 0; padding: 0; background: none; color: var(--accent-ink); font-size: 11.5px; cursor: pointer; text-decoration: underline; text-underline-offset: 3px; }
+  .detail-link:hover { color: var(--accent); }
+  .role-table td { font-size: 12.5px; }
+  .role-table td:first-child { font-family: var(--mono); font-size: 10.5px; color: var(--muted); white-space: nowrap; }
+  .role-table code { white-space: normal; }
+
   /* ---------- modules ---------- */
   .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
   .search-box { position: relative; flex: 1 1 240px; max-width: 320px; }
@@ -524,6 +566,8 @@
     .comp { min-width: 0; }
     .concept-grid { grid-template-columns: 1fr; }
     .callout, .split { grid-template-columns: 1fr; }
+    .diagram-card { padding: 18px 16px 12px; }
+    .diagram-head { flex-direction: column; gap: 2px; }
     .stage-row { grid-template-columns: 1fr; gap: 3px; padding: 13px 16px; }
     .stage-row .label { text-align: left; }
     .rejected { grid-template-columns: 1fr; }
@@ -599,6 +643,7 @@
     <nav class="site-nav" aria-label="页面导航">
       <a href="#overview">全景</a>
       <a href="#flows">流转</a>
+      <a href="#runtime">运行</a>
       <a href="#domain">领域</a>
       <a href="#lifecycle">生命周期</a>
       <a href="#modules">模块</a>
@@ -939,9 +984,283 @@
     </div>
   </section>
 
+  <section class="section wrap" id="runtime">
+    <div class="section-head reveal">
+      <div class="section-num">03 / RUNTIME</div>
+      <div>
+        <h2>Session、Router 与 Worker 如何运转</h2>
+        <p>同一个 DSH 宿主进程里，Session 只有两种角色：主 Session（router）只负责研判与路由，每张工单一个 Worker Session（worker）负责实现与验证。两者不直接对话，事实都经 Engine 落库、由 Effects 送达。</p>
+      </div>
+    </div>
+
+    <figure class="diagram-card reveal">
+      <figcaption class="diagram-head">
+        <div>
+          <p class="diagram-kicker">01 / SESSIONS</p>
+          <h3>两种角色，一个宿主</h3>
+          <p>Main Session 始终只有一个；每张工单拥有自己的 Worker Session 与目录。两侧都只通过 Engine 的工具写入事实，消息与报告由 Effects 在提交后送达。</p>
+        </div>
+      </figcaption>
+      <div class="diagram-scroll">
+        <svg class="diagram" viewBox="0 0 960 430" role="img" aria-label="Session 拓扑：Engine 与 Effects 位于中间，主 Session 和每工单一个的 Worker Session 通过工具与消息相连">
+          <defs>
+            <marker id="dga-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path class="dg-head" d="M0 0 10 5 0 10Z"/>
+            </marker>
+            <marker id="dga-accent" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path class="dg-head accent" d="M0 0 10 5 0 10Z"/>
+            </marker>
+          </defs>
+
+          <rect class="dg-frame" x="20" y="30" width="920" height="390" rx="18"/>
+          <text class="dg-mono" x="40" y="51">DSH 宿主进程 · dsh-superagent 插件</text>
+
+          <rect class="dg-box accent" x="40" y="66" width="260" height="132" rx="12"/>
+          <text class="dg-kicker accent" x="58" y="88">MAIN · ROUTER</text>
+          <text class="dg-title" x="58" y="112">Main Session</text>
+          <text class="dg-sub" x="58" y="133">整个部署一个 · router preset</text>
+          <text class="dg-sub" x="58" y="151">14 个应用工具 · 只路由与转达</text>
+          <text class="dg-faint" x="58" y="171">候选在这里决策 · 报告在这里转达</text>
+
+          <rect class="dg-box violet" x="40" y="246" width="260" height="132" rx="12"/>
+          <text class="dg-kicker violet" x="58" y="268">WORKER · EXECUTOR</text>
+          <text class="dg-title" x="58" y="292">Worker Session ×N</text>
+          <text class="dg-sub" x="58" y="313">每张工单一个 · worker preset</text>
+          <text class="dg-sub" x="58" y="331">独立目录 · 6 个应用工具</text>
+          <text class="dg-faint" x="58" y="351">子代理使用 standard preset</text>
+
+          <rect class="dg-box amber" x="420" y="66" width="200" height="144" rx="12"/>
+          <text class="dg-kicker amber" x="438" y="88">ENGINE</text>
+          <text class="dg-title" x="438" y="112">Engine</text>
+          <text class="dg-sub" x="438" y="133">唯一写入者 · 每个命令一个事务</text>
+          <text class="dg-sub" x="438" y="151">角色化接口：Sources / Main / Worker</text>
+          <text class="dg-faint" x="438" y="171">工具是 Session 唯一的写入口</text>
+
+          <rect class="dg-box" x="420" y="228" width="200" height="150" rx="12"/>
+          <text class="dg-kicker plain" x="438" y="250">EFFECTS</text>
+          <text class="dg-title" x="438" y="274">Effects</text>
+          <text class="dg-sub" x="438" y="294">持久副作用队列</text>
+          <text class="dg-mono" x="438" y="312">assessment · launch</text>
+          <text class="dg-mono" x="438" y="328">delivery · relay</text>
+          <text class="dg-mono" x="438" y="344">notice · reply</text>
+
+          <rect class="dg-box blue" x="700" y="66" width="220" height="124" rx="12"/>
+          <text class="dg-kicker blue" x="718" y="88">SOURCES</text>
+          <text class="dg-title" x="718" y="112">Feishu / GitHub</text>
+          <text class="dg-sub" x="718" y="133">Trigger · Thread · Channel</text>
+          <text class="dg-faint" x="718" y="151">轮询、通知与实时事件</text>
+
+          <rect class="dg-box" x="700" y="246" width="220" height="132" rx="12"/>
+          <text class="dg-kicker plain" x="718" y="268">OUTBOX · CHANNEL</text>
+          <text class="dg-title" x="718" y="292">回执与发送</text>
+          <text class="dg-sub" x="718" y="313">确认 / 回答 / 结果 / 提问</text>
+          <text class="dg-faint" x="718" y="331">有序 · 重试 · 丢弃有记录</text>
+
+          <path class="dg-arrow accent" d="M300 112 H416" marker-end="url(#dga-accent)"/>
+          <text class="dg-label accent" x="306" y="103">tools</text>
+          <path class="dg-arrow" d="M420 300 H380 V150 H304" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="306" y="166">候选 / 报告</text>
+          <path class="dg-arrow" d="M300 264 H370 V196 H416" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="306" y="256">报告 / 交回</text>
+          <path class="dg-arrow" d="M420 316 H304" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="306" y="308">launch / Input</text>
+          <path class="dg-arrow" d="M700 112 H624" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="634" y="103">Trigger</text>
+          <path class="dg-arrow" d="M520 210 V224" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="528" y="221">enqueue</text>
+          <path class="dg-arrow" d="M620 174 H660 V300 H696" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="666" y="282">reply</text>
+          <path class="dg-arrow" d="M810 242 V194" marker-end="url(#dga-arrow)"/>
+          <text class="dg-label" x="818" y="222">Channel 发送</text>
+
+          <text class="dg-faint" x="40" y="402">同一个宿主：Sessions 负责创建与管理 Session；事实经 Engine 落库、由 Effects 送达，两种角色不直接对话。</text>
+        </svg>
+      </div>
+      <div class="diagram-foot">
+        <span>Session 之间没有共享上下文；候选、报告与 follow-up 都经 Engine 与 Effects 中转。</span>
+        <button class="detail-link" type="button" data-inspect="main-session">Main Session 详情</button>
+        <button class="detail-link" type="button" data-inspect="worker-session">Worker Session 详情</button>
+      </div>
+    </figure>
+
+    <figure class="diagram-card reveal">
+      <figcaption class="diagram-head">
+        <div>
+          <p class="diagram-kicker">02 / ROUTER</p>
+          <h3>一次 turn 的五个动作</h3>
+          <p>主 Session 的每个 turn 都很短：消息到达、读取研判、做出决定、写入效果，然后结束 turn。它不等待长命令，也不阻塞新的候选。</p>
+        </div>
+      </figcaption>
+      <div class="diagram-scroll">
+        <svg class="diagram" viewBox="0 0 960 330" role="img" aria-label="Router 的工作循环：消息到达、读取研判、做出决定、写入效果、结束 turn，然后等待下一条消息">
+          <defs>
+            <marker id="dgb-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path class="dg-head" d="M0 0 10 5 0 10Z"/>
+            </marker>
+          </defs>
+
+          <text class="dg-mono" x="24" y="26">MAIN SESSION · ROUTER PRESET · 一次 TURN</text>
+          <text class="dg-faint" x="936" y="26" text-anchor="end">只路由，不做技术决定</text>
+
+          <g>
+            <rect class="dg-box accent" x="24" y="56" width="168" height="196" rx="12"/>
+            <text class="dg-kicker accent" x="38" y="78">STEP 01</text>
+            <text class="dg-title" x="38" y="102">消息到达</text>
+            <text class="dg-faint" x="38" y="128">候选 / 报告 / follow-up</text>
+            <text class="dg-faint" x="38" y="146">通知与后台作业结果</text>
+            <text class="dg-faint" x="38" y="164">turn 下一步一起送达</text>
+            <text class="dg-faint" x="38" y="182">通知不唤醒 Session</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="210" y="56" width="168" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="224" y="78">STEP 02</text>
+            <text class="dg-title" x="224" y="102">读取与研判</text>
+            <text class="dg-mono" x="224" y="128">orchestrator_read</text>
+            <text class="dg-mono" x="224" y="144">orchestrator_eval</text>
+            <text class="dg-faint" x="224" y="164">有界上下文：Thread 窗口</text>
+            <text class="dg-faint" x="224" y="182">只给事实，不给指令</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="396" y="56" width="168" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="410" y="78">STEP 03</text>
+            <text class="dg-title" x="410" y="102">做出决定</text>
+            <text class="dg-mono" x="410" y="128">orchestrator_route</text>
+            <text class="dg-faint" x="410" y="146">accept / attach</text>
+            <text class="dg-faint" x="410" y="164">stop / ignore</text>
+            <text class="dg-faint" x="410" y="182">一次 1–20 个决策</text>
+            <text class="dg-faint" x="410" y="200">有人拥有时只可 stop</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="582" y="56" width="168" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="596" y="78">STEP 04</text>
+            <text class="dg-title" x="596" y="102">写入效果</text>
+            <text class="dg-mono" x="596" y="128">orchestrator_reply</text>
+            <text class="dg-faint" x="596" y="146">ack / answer / result</text>
+            <text class="dg-faint" x="596" y="164">attention · note · requeue</text>
+            <text class="dg-faint" x="596" y="182">accept → Ticket + launch</text>
+            <text class="dg-faint" x="596" y="200">先入队，提交后执行</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="768" y="56" width="168" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="782" y="78">STEP 05</text>
+            <text class="dg-title" x="782" y="102">结束 turn</text>
+            <text class="dg-faint" x="782" y="128">不等待结果、不 sleep</text>
+            <text class="dg-faint" x="782" y="146">长 shell 与 job 等待</text>
+            <text class="dg-faint" x="782" y="164">会被 noWait 拒绝</text>
+            <text class="dg-faint" x="782" y="182">新消息在下一步到达</text>
+          </g>
+
+          <path class="dg-arrow" d="M194 154 H206" marker-end="url(#dgb-arrow)"/>
+          <path class="dg-arrow" d="M380 154 H392" marker-end="url(#dgb-arrow)"/>
+          <path class="dg-arrow" d="M566 154 H578" marker-end="url(#dgb-arrow)"/>
+          <path class="dg-arrow" d="M752 154 H764" marker-end="url(#dgb-arrow)"/>
+          <path class="dg-arrow" d="M852 252 V290 H108 V258" marker-end="url(#dgb-arrow)"/>
+          <text class="dg-label" x="480" y="308" text-anchor="middle">下一条消息到达：下一轮 turn 再从 01 开始</text>
+        </svg>
+      </div>
+      <div class="diagram-foot">
+        <span>路由备注 ≤ 30 词，聊天消息 ≤ 100 词；noWait 拒绝 sleep、超过 30 秒的 shell 超时和超过 5 秒的 job 等待。</span>
+        <button class="detail-link" type="button" data-inspect="main-session">Main Session 详情</button>
+      </div>
+    </figure>
+
+    <figure class="diagram-card reveal">
+      <figcaption class="diagram-head">
+        <div>
+          <p class="diagram-kicker">03 / WORKER</p>
+          <h3>一个工单的一次执行</h3>
+          <p>从准备目录到报告 ready，Worker 在自己的 Session 与目录里完成工作。订阅消息与人的回复作为 Input 在下一步注入，后台作业与重启都不会丢失工作。</p>
+        </div>
+      </figcaption>
+      <div class="diagram-scroll">
+        <svg class="diagram" viewBox="0 0 960 340" role="img" aria-label="Worker 的生命周期：启动准备、在目录里工作、接收 Input、报告与交付，以及交还给人后的恢复">
+          <defs>
+            <marker id="dgc-arrow" viewBox="0 0 10 10" refX="8.5" refY="5" markerWidth="6" markerHeight="6" orient="auto">
+              <path class="dg-head" d="M0 0 10 5 0 10Z"/>
+            </marker>
+          </defs>
+
+          <text class="dg-mono" x="30" y="26">WORKER SESSION · WORKER PRESET · 一个工单</text>
+          <text class="dg-faint" x="930" y="26" text-anchor="end">一个工单 = 一个 Session + 一个目录</text>
+
+          <g>
+            <rect class="dg-box violet" x="30" y="56" width="210" height="196" rx="12"/>
+            <text class="dg-kicker violet" x="46" y="78">STEP 01</text>
+            <text class="dg-title" x="46" y="102">启动与准备</text>
+            <text class="dg-faint" x="46" y="128">prepare 目录（一次）</text>
+            <text class="dg-faint" x="46" y="146">创建 worker-&lt;ticket id&gt;</text>
+            <text class="dg-faint" x="46" y="164">首条消息：任务 + 来源卡片</text>
+            <text class="dg-faint" x="46" y="182">10 分钟准备上限</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="260" y="56" width="210" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="276" y="78">STEP 02</text>
+            <text class="dg-title" x="276" y="102">在目录里工作</text>
+            <text class="dg-faint" x="276" y="128">读来源、判断范围</text>
+            <text class="dg-faint" x="276" y="146">实现 → 自审 → 跑检查</text>
+            <text class="dg-faint" x="276" y="164">提交、推送、打开 PR</text>
+            <text class="dg-faint" x="276" y="182">超过 5 秒的命令转后台</text>
+          </g>
+          <g>
+            <rect class="dg-box" x="490" y="56" width="210" height="196" rx="12"/>
+            <text class="dg-kicker plain" x="506" y="78">STEP 03</text>
+            <text class="dg-title" x="506" y="102">接收 Input</text>
+            <text class="dg-faint" x="506" y="128">订阅扇出 / CI / Policy</text>
+            <text class="dg-faint" x="506" y="146">人的消息可多用一槽</text>
+            <text class="dg-faint" x="506" y="164">在下一步按顺序注入</text>
+            <text class="dg-faint" x="506" y="182">唤醒空闲的 worker</text>
+          </g>
+          <g>
+            <rect class="dg-box accent" x="720" y="56" width="210" height="196" rx="12"/>
+            <text class="dg-kicker accent" x="736" y="78">STEP 04</text>
+            <text class="dg-title" x="736" y="102">报告与交付</text>
+            <text class="dg-faint" x="736" y="128">progress / waiting</text>
+            <text class="dg-faint" x="736" y="146">ready / blocked / failed</text>
+            <text class="dg-faint" x="736" y="164">dropped：无需人处理</text>
+            <text class="dg-faint" x="736" y="182">ready + PR → 等待评审</text>
+          </g>
+
+          <path class="dg-arrow" d="M240 154 H256" marker-end="url(#dgc-arrow)"/>
+          <path class="dg-arrow" d="M470 154 H486" marker-end="url(#dgc-arrow)"/>
+          <path class="dg-arrow" d="M700 154 H716" marker-end="url(#dgc-arrow)"/>
+
+          <rect class="dg-box" x="30" y="272" width="900" height="50" rx="10"/>
+          <text class="dg-sub" x="46" y="292"><tspan font-weight="600">交还给人：</tspan>ready、问题、blocked 或 failed 时释放槽位，工具仍可继续用；人的消息会唤醒或恢复它。</text>
+          <text class="dg-faint" x="46" y="310">重启：中断的 Assignment 带恢复说明再启动，未读 Input 重投；retry 沿用同一 Session、目录、分支与 PR。</text>
+        </svg>
+      </div>
+      <div class="diagram-foot">
+        <span>槽位从 launch（含 prepare）或唤醒空闲 worker 的 delivery 开始占用；后台作业在 turn 结束后继续占用，直到 Assignment 结束。</span>
+        <button class="detail-link" type="button" data-inspect="worker-session">Worker Session 详情</button>
+      </div>
+    </figure>
+
+    <div class="table-wrap reveal">
+      <table class="modules role-table">
+        <thead>
+          <tr><th scope="col">维度</th><th scope="col">Main Session · Router</th><th scope="col">Worker Session · Worker</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>数量</td><td>整个部署一个</td><td>每张工单一个，命名为 <code>worker-&lt;ticket id&gt;</code></td></tr>
+          <tr><td>preset</td><td><code>dsh-superagent-router</code></td><td><code>dsh-superagent-worker</code>；子代理使用 <code>standard</code></td></tr>
+          <tr><td>应用工具</td><td>14 个：读取、路由、研判、回复与配置</td><td>6 个：读取、确认、报告、交回与跟进 Thread</td></tr>
+          <tr><td>收到</td><td>候选、follow-up、Worker 报告与通知</td><td>Assignment 与 Input：订阅扇出、CI、Policy 变更与人的消息</td></tr>
+          <tr><td>产出</td><td>Decision、Channel 回复、转达与配置</td><td>代码与 PR、Report、结构化问题</td></tr>
+          <tr><td>等待策略</td><td>不等待：noWait 拒绝 sleep、长 shell 与长 job 等待</td><td>长命令转后台作业；完成后唤醒同一槽位</td></tr>
+          <tr><td>边界</td><td>只路由，不做技术决定；路由备注 ≤ 30 词</td><td>只读写自己的工单、Thread 与目录</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">
+      <div class="note reveal"><strong>两种角色不直接对话</strong>候选、报告与 follow-up 都先由 Engine 落库，再由 Effects 路由到目标 Session。Session 之间没有共享上下文，也没有互相调用的工具。</div>
+      <div class="note reveal"><strong>“结束 turn”不等于结束工作</strong>Main Session 结束 turn 后，新候选与新报告在下一次 turn 到达；Worker 结束 turn 后，后台作业、新 Input 或人的消息会把它唤醒。恢复因此不依赖某个 Session 一直活着。</div>
+    </div>
+  </section>
+
   <section class="section wrap" id="domain">
     <div class="section-head reveal">
-      <div class="section-num">03 / DOMAIN</div>
+      <div class="section-num">04 / DOMAIN</div>
       <div>
         <h2>十一个概念，各自守住一条规则</h2>
         <p>Source、Thread、Eval、Mandate 与 Subscription 构成核心；其余概念围绕授权与执行。代码、工具、面板与文档都只说这些词。</p>
@@ -1037,7 +1356,7 @@
 
   <section class="section wrap" id="lifecycle">
     <div class="section-head reveal">
-      <div class="section-num">04 / LIFECYCLE</div>
+      <div class="section-num">05 / LIFECYCLE</div>
       <div>
         <h2>工单此刻在等谁</h2>
         <p>每张打开的工单只有一个阶段，由它在等待的东西决定。从上往下读，第一个匹配的行生效；person 阶段意味着缺少人的输入就无法继续。</p>
@@ -1091,7 +1410,7 @@
 
   <section class="section wrap" id="modules">
     <div class="section-head reveal">
-      <div class="section-num">05 / MODULES</div>
+      <div class="section-num">06 / MODULES</div>
       <div>
         <h2>代码落在哪里</h2>
         <p>核心只依赖自身的类型与 Node 的哈希；Source 不导入 app；每个状态只有一个写入者。下表是阅读代码的索引，完整清单见架构文档。</p>
@@ -1181,7 +1500,7 @@
 
   <section class="section wrap" id="glossary">
     <div class="section-head reveal">
-      <div class="section-num">06 / GLOSSARY</div>
+      <div class="section-num">07 / GLOSSARY</div>
       <div>
         <h2>术语表</h2>
         <p>代码、工具、面板与文档共用这些词。发给人的 GitHub 评论与 Feishu 消息使用日常语言，而不是这里的术语。</p>

@@ -14,9 +14,11 @@ dsh 超级 agent 是构建在 [DeepSeek Harness](https://www.deepseek.com/en/har
 
 ## 架构概览
 
-[docs/architecture-overview.html](docs/architecture-overview.html) 是一页可直接用浏览器打开的可视化架构概览，覆盖来源接入、授权研判、工单执行与结果交付。页面没有外部依赖，支持浅色与深色主题。
+[docs/architecture-overview.html](docs/architecture-overview.html) 是一页可直接用浏览器打开的可视化架构概览，覆盖来源接入、授权研判、工单执行与结果交付，以及 Session / Router / Worker 的工作循环。页面没有外部依赖，支持浅色与深色主题。
 
 [![架构概览：六段主链路与五层组件](docs/assets/architecture-overview-diagram.jpg)](docs/architecture-overview.html)
+
+[![Session、Router 与 Worker 的工作原理](docs/assets/session-router-worker.jpg)](docs/architecture-overview.html#runtime)
 
 ## 在这里实践什么
 

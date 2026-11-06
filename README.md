@@ -12,6 +12,12 @@ dsh 超级 agent 是构建在 [DeepSeek Harness](https://www.deepseek.com/en/har
 - 它遵循一条原则：**尽量少占用人的注意力，尽量多交付价值**。只在被请求或团队书面规则允许时行动；只在有结果、需要决策或无法完成时说话。
 - 人类负责审阅与合并。agent 的产出先成为可供审阅的 PR，而不是直接进入主分支。
 
+## 架构概览
+
+[docs/architecture-overview.html](docs/architecture-overview.html) 是一页可直接用浏览器打开的可视化架构概览，覆盖来源接入、授权研判、工单执行与结果交付。页面没有外部依赖，支持浅色与深色主题。
+
+[![架构概览：六段主链路与五层组件](docs/assets/architecture-overview-diagram.jpg)](docs/architecture-overview.html)
+
 ## 在这里实践什么
 
 - 从 IM / GitHub 请求到工单、分支、PR、评审、合并的完整闭环。

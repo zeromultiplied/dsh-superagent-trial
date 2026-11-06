@@ -1,0 +1,1805 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>超级 Agent 架构概览 · dsh-superagent</title>
+<meta name="description" content="dsh-superagent 的可视化架构概览：来源接入、授权研判、工单执行与结果交付。">
+<script>
+(function () {
+  var d = document.documentElement;
+  d.classList.add('js');
+  try {
+    var q = new URLSearchParams(window.location.search).get('theme');
+    var s = localStorage.getItem('dsh-arch-theme');
+    var p = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    d.setAttribute('data-theme',
+      (q === 'dark' || q === 'light') ? q : ((s === 'dark' || s === 'light') ? s : (p ? 'dark' : 'light')));
+  } catch (e) { /* keep the light default */ }
+})();
+</script>
+<style>
+  :root {
+    color-scheme: light;
+    --paper: #f3f0e6;
+    --surface: #fffdf7;
+    --surface-2: #f8f4ea;
+    --ink: #1c1c17;
+    --ink-2: #3d3b33;
+    --muted: #6e6a5d;
+    --faint: #9a9484;
+    --line: #ded7c7;
+    --line-strong: #c9c1ad;
+    --accent: #0d6f63;
+    --accent-ink: #084c43;
+    --accent-soft: #dcece7;
+    --amber: #a85a0a;
+    --amber-soft: #f6e7cf;
+    --rose: #a13a4a;
+    --rose-soft: #f5e2e4;
+    --blue: #2d5a8e;
+    --blue-soft: #e2eaf4;
+    --violet: #6b4f8a;
+    --violet-soft: #ece5f2;
+    --shadow: 0 24px 60px -36px rgba(28, 28, 23, .38);
+    --radius: 16px;
+    --header-bg: rgba(243, 240, 230, .86);
+    --mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
+    --sans: "Inter", "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC", sans-serif;
+    --serif: "Iowan Old Style", "Palatino Linotype", "Songti SC", "Noto Serif SC", Georgia, serif;
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+    --paper: #111310;
+    --surface: #181a16;
+    --surface-2: #1f221d;
+    --ink: #eee9dc;
+    --ink-2: #cfc9ba;
+    --muted: #a29c8c;
+    --faint: #777264;
+    --line: #2e312a;
+    --line-strong: #41453b;
+    --accent: #63d6c2;
+    --accent-ink: #9aead9;
+    --accent-soft: #1c3733;
+    --amber: #e0a35a;
+    --amber-soft: #3a2c1a;
+    --rose: #e3929e;
+    --rose-soft: #3a2227;
+    --blue: #8fb4dd;
+    --blue-soft: #1d2a39;
+    --violet: #b9a1d2;
+    --violet-soft: #2a2235;
+    --shadow: 0 30px 70px -40px rgba(0, 0, 0, .8);
+    --header-bg: rgba(17, 19, 16, .86);
+  }
+
+  *, *::before, *::after { box-sizing: border-box; }
+  html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background:
+      radial-gradient(1100px 600px at 88% -8%, var(--accent-soft), transparent 62%),
+      var(--paper);
+    color: var(--ink);
+    font-family: var(--sans);
+    font-size: 16px;
+    line-height: 1.62;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+  }
+  ::selection { background: var(--accent); color: var(--surface); }
+  a { color: inherit; }
+  button { font: inherit; color: inherit; }
+  [hidden] { display: none !important; }
+  svg { display: block; }
+  .wrap { width: min(1180px, calc(100% - 48px)); margin-inline: auto; }
+  .mono { font-family: var(--mono); }
+  .sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+  .icon { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .icon-lg { width: 26px; height: 26px; }
+
+  .skip {
+    position: fixed; left: 16px; top: -60px; z-index: 200;
+    padding: 10px 16px; border-radius: 8px; background: var(--ink); color: var(--paper);
+    text-decoration: none; font-size: 13px; transition: top .2s;
+  }
+  .skip:focus { top: 16px; }
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 4px; }
+
+  /* ---------- header ---------- */
+  .site-header {
+    position: sticky; top: 0; z-index: 50;
+    background: var(--header-bg);
+    backdrop-filter: blur(16px) saturate(1.1);
+    border-bottom: 1px solid var(--line);
+  }
+  .header-inner { height: 64px; display: flex; align-items: center; justify-content: space-between; gap: 24px; }
+  .brand { display: flex; align-items: center; gap: 11px; text-decoration: none; letter-spacing: -.01em; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 10px;
+    display: grid; place-items: center;
+    background: var(--surface); border: 1px solid var(--line-strong); color: var(--accent);
+    box-shadow: inset 0 1px 0 rgba(255,255,255,.5);
+  }
+  .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+  .brand-text b { font-size: 14px; font-weight: 650; }
+  .brand-text small { font-family: var(--mono); font-size: 9px; letter-spacing: .14em; color: var(--muted); text-transform: uppercase; }
+  .site-nav { display: flex; align-items: center; gap: 2px; }
+  .site-nav a {
+    padding: 7px 11px; border-radius: 999px; text-decoration: none;
+    font-size: 13px; color: var(--muted); transition: color .18s, background .18s;
+  }
+  .site-nav a:hover { color: var(--ink); background: var(--surface-2); }
+  .site-nav a.active { color: var(--accent-ink); background: var(--accent-soft); }
+  .theme-toggle {
+    width: 36px; height: 36px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 10px; background: var(--surface);
+    color: var(--ink-2); cursor: pointer; transition: border-color .18s, color .18s;
+  }
+  .theme-toggle:hover { border-color: var(--accent); color: var(--accent); }
+  .theme-toggle .icon-moon { display: none; }
+  [data-theme="dark"] .theme-toggle .icon-sun { display: none; }
+  [data-theme="dark"] .theme-toggle .icon-moon { display: block; }
+
+  /* ---------- hero ---------- */
+  .hero { position: relative; padding: 76px 0 0; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -20% -10% auto 40%; height: 620px; z-index: -1;
+    background: radial-gradient(closest-side, var(--accent-soft), transparent 72%);
+    opacity: .8;
+  }
+  .hero-grid { display: grid; grid-template-columns: minmax(0, 1.35fr) minmax(300px, .72fr); gap: 64px; align-items: center; }
+  .eyebrow {
+    display: flex; align-items: center; gap: 10px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .17em;
+    text-transform: uppercase; color: var(--accent);
+  }
+  .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft); }
+  h1 {
+    margin: 20px 0 22px;
+    font-family: var(--serif); font-weight: 500;
+    font-size: clamp(46px, 7vw, 86px); line-height: 1.02; letter-spacing: -.045em;
+  }
+  h1 .accent { color: var(--accent); }
+  .lede { max-width: 56ch; margin: 0; font-size: clamp(16px, 1.35vw, 18.5px); color: var(--ink-2); }
+  .hero-actions { display: flex; flex-wrap: wrap; gap: 10px; margin-top: 30px; }
+  .btn {
+    display: inline-flex; align-items: center; gap: 9px;
+    padding: 11px 18px; border-radius: 10px; border: 1px solid var(--line-strong);
+    background: var(--surface); color: var(--ink); text-decoration: none;
+    font-size: 13.5px; font-weight: 550; transition: transform .18s, border-color .18s, background .18s;
+  }
+  .btn:hover { transform: translateY(-1px); border-color: var(--accent); }
+  .btn-primary { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  [data-theme="dark"] .btn-primary { color: #111310; }
+  .btn-primary:hover { background: var(--accent-ink); border-color: var(--accent-ink); color: var(--paper); }
+  [data-theme="dark"] .btn-primary:hover { color: #111310; }
+  .btn .icon { width: 15px; height: 15px; }
+
+  .principle-card {
+    position: relative; background: var(--surface); border: 1px solid var(--line);
+    border-radius: var(--radius); padding: 30px 28px 24px; box-shadow: var(--shadow);
+  }
+  .principle-card::before {
+    content: "“"; position: absolute; right: 18px; top: 2px;
+    font-family: var(--serif); font-size: 84px; line-height: 1; color: var(--accent-soft);
+  }
+  .card-kicker { margin: 0 0 14px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; color: var(--muted); text-transform: uppercase; }
+  .principle-card blockquote {
+    margin: 0; font-family: var(--serif); font-size: 19px; line-height: 1.45; letter-spacing: -.01em; color: var(--ink);
+  }
+  .principle-card .translation { margin: 14px 0 0; font-size: 13px; color: var(--accent); }
+  .principle-card ul { list-style: none; margin: 20px 0 0; padding: 16px 0 0; border-top: 1px solid var(--line); display: grid; gap: 8px; }
+  .principle-card li { position: relative; padding-left: 16px; font-size: 12.5px; color: var(--muted); line-height: 1.5; }
+  .principle-card li::before { content: ""; position: absolute; left: 0; top: .55em; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(4, 1fr);
+    margin-top: 66px; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line);
+  }
+  .stat { padding: 20px 26px; border-left: 1px solid var(--line); }
+  .stat:first-child { border-left: 0; padding-left: 0; }
+  .stat b { display: block; font-family: var(--serif); font-weight: 500; font-size: 36px; line-height: 1.1; letter-spacing: -.03em; }
+  .stat span { display: block; margin-top: 4px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }
+  .stat em { font-style: normal; color: var(--accent); }
+
+  /* ---------- sections ---------- */
+  .section { padding-top: 92px; scroll-margin-top: 80px; }
+  .section-head { display: grid; grid-template-columns: 230px minmax(0, 1fr); gap: 40px; align-items: start; margin-bottom: 34px; }
+  .section-num { display: flex; align-items: center; gap: 10px; font-family: var(--mono); font-size: 10.5px; letter-spacing: .16em; color: var(--accent); }
+  .section-num::after { content: ""; width: 34px; height: 1px; background: var(--accent); opacity: .5; }
+  .section-head h2 {
+    margin: 0 0 10px; font-family: var(--serif); font-weight: 500;
+    font-size: clamp(30px, 3.8vw, 44px); line-height: 1.08; letter-spacing: -.035em;
+  }
+  .section-head p { margin: 0; max-width: 70ch; color: var(--muted); font-size: 14.5px; }
+
+  /* ---------- stage / ribbon ---------- */
+  .stage {
+    position: relative; overflow: hidden;
+    background:
+      radial-gradient(900px 380px at 12% -20%, rgba(99, 214, 194, .14), transparent 65%),
+      radial-gradient(700px 400px at 92% 120%, rgba(226, 163, 90, .1), transparent 60%),
+      #0e1a17;
+    border: 1px solid #1e312c; border-radius: 24px; padding: 30px;
+    color: #e9f2ec; box-shadow: 0 40px 90px -60px rgba(14, 26, 23, .9);
+  }
+  .stage-top { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 24px; }
+  .stage-kicker { margin: 0; font-family: var(--mono); font-size: 9.5px; letter-spacing: .16em; text-transform: uppercase; color: #8fcec1; }
+  .stage-title { margin: 6px 0 0; font-size: 18px; font-weight: 600; letter-spacing: -.01em; }
+  .stage-hint { margin: 0; font-size: 11.5px; color: rgba(233, 242, 236, .55); }
+  .ribbon-scroll { overflow-x: auto; padding: 4px 0 8px; scrollbar-width: thin; }
+  .ribbon { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 28px; min-width: 920px; }
+  .node {
+    position: relative; display: flex; flex-direction: column; gap: 5px;
+    min-height: 178px; padding: 16px 15px 15px; text-align: left;
+    background: rgba(255, 255, 255, .045);
+    border: 1px solid rgba(233, 242, 236, .13); border-radius: 14px;
+    color: inherit; cursor: pointer;
+    transition: transform .2s ease, background .2s, border-color .2s;
+  }
+  .node:hover, .node:focus-visible { transform: translateY(-3px); background: rgba(255, 255, 255, .085); border-color: rgba(99, 214, 194, .55); }
+  .node:not(:last-child)::after {
+    content: "→"; position: absolute; right: -23px; top: 50%; transform: translateY(-50%);
+    font-family: var(--mono); font-size: 13px; color: rgba(233, 242, 236, .3);
+  }
+  .node-index { font-family: var(--mono); font-size: 9.5px; letter-spacing: .14em; color: #8fcec1; }
+  .node .icon { width: 27px; height: 27px; margin: 3px 0 1px; color: #8fcec1; }
+  .node-title { font-size: 16.5px; font-weight: 600; letter-spacing: -.01em; }
+  .node-sub { font-size: 11.5px; line-height: 1.45; color: rgba(233, 242, 236, .6); }
+  .stage-legend { display: flex; flex-wrap: wrap; gap: 10px 26px; margin-top: 20px; padding-top: 16px; border-top: 1px solid rgba(233, 242, 236, .1); }
+  .stage-legend span { display: flex; align-items: center; gap: 8px; font-size: 11.5px; color: rgba(233, 242, 236, .55); }
+  .stage-legend i { width: 7px; height: 7px; border-radius: 50%; background: #8fcec1; }
+  .stage-legend span:nth-child(2) i { background: #e2a35a; }
+  .stage-legend span:nth-child(3) i { background: #b9a1d2; }
+
+  /* ---------- layers ---------- */
+  .layers { display: grid; gap: 14px; margin-top: 28px; }
+  .layer {
+    display: grid; grid-template-columns: 186px minmax(0, 1fr); gap: 20px;
+    padding: 20px 22px; background: var(--surface);
+    border: 1px solid var(--line); border-left: 3px solid var(--c); border-radius: var(--radius);
+  }
+  .layer-head .layer-num { font-family: var(--mono); font-size: 9.5px; letter-spacing: .15em; color: var(--c); }
+  .layer-head h3 { margin: 3px 0 2px; font-size: 17px; letter-spacing: -.01em; }
+  .layer-head p { margin: 0; font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .layer-body { display: grid; grid-template-columns: repeat(var(--layer-cols, 4), minmax(0, 1fr)); gap: 9px; align-content: flex-start; }
+  .comp {
+    min-width: 0; text-align: left;
+    padding: 11px 13px; background: var(--surface-2);
+    border: 1px solid transparent; border-radius: 10px; cursor: pointer;
+    transition: border-color .18s, background .18s, transform .18s;
+  }
+  .comp:hover, .comp:focus-visible { background: var(--surface); border-color: var(--c); transform: translateY(-1px); }
+  .comp strong { display: block; font-size: 13.5px; font-weight: 600; letter-spacing: -.01em; }
+  .comp span { display: block; margin-top: 2px; font-size: 11.5px; line-height: 1.42; color: var(--muted); }
+
+  /* ---------- tabs / flows ---------- */
+  .tabs { display: none; gap: 4px; border-bottom: 1px solid var(--line); margin-bottom: 30px; overflow-x: auto; }
+  .js .tabs { display: flex; }
+  .tab {
+    flex: 0 0 auto; padding: 11px 16px 12px; border: 0; border-bottom: 2px solid transparent;
+    background: none; color: var(--muted); font-size: 13.5px; cursor: pointer;
+    transition: color .18s, border-color .18s;
+  }
+  .tab:hover { color: var(--ink); }
+  .tab[aria-selected="true"] { color: var(--ink); border-color: var(--accent); }
+  .js .flow-panel { display: none; }
+  .js .flow-panel.is-active { display: block; animation: fade-up .35s ease both; }
+  .flow-panel > h3 { margin: 0 0 6px; font-size: 20px; letter-spacing: -.02em; }
+  .flow-panel > .flow-lede { margin: 0 0 26px; color: var(--muted); font-size: 14px; max-width: 76ch; }
+  @keyframes fade-up { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
+  .timeline { list-style: none; margin: 0; padding: 0; position: relative; max-width: 940px; }
+  .timeline::before { content: ""; position: absolute; left: 19px; top: 10px; bottom: 10px; width: 1px; background: var(--line); }
+  .tl-item { position: relative; display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 20px; padding-bottom: 26px; }
+  .tl-item:last-child { padding-bottom: 0; }
+  .tl-marker {
+    position: relative; z-index: 1; width: 40px; height: 40px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 50%; background: var(--surface);
+    font-family: var(--mono); font-size: 10.5px; color: var(--muted);
+  }
+  .tl-item[data-tone="accent"] .tl-marker { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-ink); }
+  .tl-item[data-tone="amber"] .tl-marker { border-color: var(--amber); background: var(--amber-soft); color: var(--amber); }
+  .tl-body { padding-top: 4px; }
+  .tl-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 5px; }
+  .tag {
+    display: inline-flex; align-items: center; padding: 2px 8px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--surface-2);
+    font-family: var(--mono); font-size: 9.5px; letter-spacing: .06em; color: var(--muted);
+  }
+  .tag.source { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 30%, var(--line)); background: var(--blue-soft); }
+  .tag.core { color: var(--amber); border-color: color-mix(in srgb, var(--amber) 30%, var(--line)); background: var(--amber-soft); }
+  .tag.exec { color: var(--violet); border-color: color-mix(in srgb, var(--violet) 30%, var(--line)); background: var(--violet-soft); }
+  .tag.deliver { color: var(--accent-ink); border-color: color-mix(in srgb, var(--accent) 30%, var(--line)); background: var(--accent-soft); }
+  .tl-body h4 { margin: 0 0 3px; font-size: 16px; letter-spacing: -.01em; }
+  .tl-body p { margin: 0; font-size: 13.5px; color: var(--ink-2); max-width: 78ch; }
+  .tl-note {
+    margin-top: 9px; padding: 9px 12px; border-left: 2px solid var(--amber);
+    background: var(--amber-soft); border-radius: 0 8px 8px 0; font-size: 12.5px; color: var(--ink-2);
+  }
+  .flow-foot {
+    display: flex; align-items: flex-start; gap: 14px; margin-top: 28px; padding: 18px 20px;
+    border: 1px solid var(--line); border-radius: 12px; background: var(--surface-2);
+    font-size: 13px; color: var(--ink-2);
+  }
+  .flow-foot .icon { flex: 0 0 auto; color: var(--accent); margin-top: 2px; }
+
+  /* ---------- domain ---------- */
+  .concept-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 13px; }
+  .concept {
+    display: flex; flex-direction: column; gap: 7px;
+    padding: 19px 20px 18px; background: var(--surface);
+    border: 1px solid var(--line); border-radius: 14px;
+    transition: border-color .18s, transform .18s;
+  }
+  .concept:hover { border-color: var(--line-strong); transform: translateY(-1px); }
+  .concept-top { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .concept-en { font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; color: var(--accent); text-transform: uppercase; }
+  .concept-cn { font-size: 11px; color: var(--muted); }
+  .concept h3 { margin: 0; font-size: 18px; font-weight: 600; letter-spacing: -.015em; }
+  .concept p { margin: 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+  .concept .rule { margin-top: auto; padding-top: 9px; border-top: 1px dashed var(--line); font-size: 12px; color: var(--muted); line-height: 1.5; }
+  .concept .rule b { color: var(--ink-2); font-weight: 600; }
+  .callout { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 13px; }
+  .note {
+    padding: 17px 19px; background: var(--surface-2); border: 1px solid var(--line);
+    border-radius: 12px; font-size: 13px; color: var(--ink-2);
+  }
+  .note strong { display: block; margin-bottom: 4px; color: var(--ink); font-size: 13.5px; }
+  .note code { font-family: var(--mono); font-size: 12px; color: var(--accent-ink); }
+  details.more {
+    margin-top: 13px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface);
+  }
+  details.more summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding: 15px 20px; cursor: pointer; list-style: none; font-size: 13.5px; font-weight: 600;
+  }
+  details.more summary::-webkit-details-marker { display: none; }
+  details.more summary::after { content: "+"; font-family: var(--mono); font-size: 15px; color: var(--muted); }
+  details.more[open] summary::after { content: "−"; }
+  .rejected { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); }
+  .rejected div { padding: 13px 20px; border-bottom: 1px solid var(--line); font-size: 12.5px; color: var(--muted); }
+  .rejected div:nth-child(odd) { border-right: 1px solid var(--line); }
+  .rejected b { display: block; color: var(--ink-2); font-size: 13px; margin-bottom: 1px; }
+
+  /* ---------- lifecycle ---------- */
+  .stage-table { border: 1px solid var(--line); border-radius: 14px; overflow: hidden; background: var(--surface); }
+  .stage-row {
+    display: grid; grid-template-columns: 206px minmax(0, 1fr) 150px; gap: 18px;
+    align-items: center; padding: 13px 18px; border-top: 1px solid var(--line); font-size: 13px;
+  }
+  .stage-row:first-child { border-top: 0; }
+  .stage-row .code { display: flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: 11.5px; }
+  .stage-row .code i { width: 7px; height: 7px; border-radius: 50%; background: var(--faint); flex: 0 0 auto; }
+  .stage-row .cond { color: var(--ink-2); font-size: 12.5px; }
+  .stage-row .label { text-align: right; font-size: 11.5px; color: var(--muted); }
+  .stage-row.person { background: linear-gradient(90deg, var(--amber-soft), transparent 52%); }
+  .stage-row.person .code i { background: var(--amber); }
+  .stage-row.work .code i { background: var(--accent); }
+  .stage-row.idle .code i { background: var(--blue); }
+  .stage-note { display: flex; gap: 10px; align-items: center; margin: 10px 2px 0; font-size: 12px; color: var(--muted); }
+  .stage-note .icon { width: 15px; height: 15px; flex: 0 0 auto; }
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 13px; margin-top: 24px; }
+  .panel-card { padding: 22px 24px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; }
+  .panel-card h3 { margin: 0 0 4px; font-size: 16px; letter-spacing: -.01em; }
+  .panel-card > p { margin: 0 0 12px; font-size: 12.5px; color: var(--muted); }
+  .end-list { list-style: none; margin: 0; padding: 0; }
+  .end-list li { display: grid; grid-template-columns: 102px minmax(0, 1fr); gap: 12px; padding: 9px 0; border-top: 1px dashed var(--line); font-size: 12.5px; color: var(--ink-2); }
+  .end-list li:first-child { border-top: 0; }
+  .end-list code { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); }
+  .report-states { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 14px; }
+  .state-pill { display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--mono); font-size: 10.5px; color: var(--muted); }
+  .state-pill i { width: 6px; height: 6px; border-radius: 50%; background: var(--faint); }
+  .state-pill.ready i { background: var(--accent); }
+  .state-pill.waiting i { background: var(--blue); }
+  .state-pill.progress i { background: var(--violet); }
+  .state-pill.blocked i, .state-pill.failed i { background: var(--rose); }
+  .state-pill.dropped i { background: var(--faint); }
+
+  /* ---------- modules ---------- */
+  .filter-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-bottom: 14px; }
+  .search-box { position: relative; flex: 1 1 240px; max-width: 320px; }
+  .search-box .icon { position: absolute; left: 11px; top: 50%; transform: translateY(-50%); width: 15px; height: 15px; color: var(--faint); pointer-events: none; }
+  .search-box input {
+    width: 100%; padding: 9px 12px 9px 34px; border: 1px solid var(--line); border-radius: 9px;
+    background: var(--surface); color: var(--ink); font: inherit; font-size: 12.5px;
+  }
+  .search-box input::placeholder { color: var(--faint); }
+  .chip {
+    padding: 5px 11px; border-radius: 999px; border: 1px solid var(--line);
+    background: var(--surface); color: var(--muted); font-family: var(--mono);
+    font-size: 10px; letter-spacing: .04em; cursor: pointer; transition: all .16s;
+  }
+  .chip:hover { border-color: var(--line-strong); color: var(--ink); }
+  .chip[aria-pressed="true"] { background: var(--ink); border-color: var(--ink); color: var(--paper); }
+  [data-theme="dark"] .chip[aria-pressed="true"] { color: #111310; }
+  .result-count { margin-left: auto; font-family: var(--mono); font-size: 10.5px; color: var(--faint); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+  .modules { width: 100%; min-width: 660px; border-collapse: collapse; font-size: 13px; }
+  .modules th {
+    padding: 11px 16px; text-align: left; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line); background: var(--surface-2);
+  }
+  .modules td { padding: 10px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .modules tbody tr:last-child td { border-bottom: 0; }
+  .modules tbody tr:hover { background: var(--surface-2); }
+  .modules code { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); white-space: nowrap; }
+  .modules .desc { color: var(--ink-2); font-size: 12.5px; }
+  .layer-pill { display: inline-block; padding: 1px 7px; border-radius: 999px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--mono); font-size: 9.5px; color: var(--muted); }
+  .empty-row td { padding: 26px 16px; text-align: center; color: var(--muted); font-size: 13px; }
+  .rules { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 9px; margin-top: 20px; }
+  .rule-card { padding: 15px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  .rule-card b { display: block; margin-bottom: 3px; font-size: 12.5px; color: var(--ink); }
+  .rule-card span { display: block; font-size: 11.5px; line-height: 1.5; color: var(--muted); }
+  .rule-card .icon { width: 16px; height: 16px; color: var(--accent); margin-bottom: 8px; }
+
+  /* ---------- glossary ---------- */
+  .glossary-table { width: 100%; min-width: 620px; border-collapse: collapse; font-size: 13px; }
+  .glossary-table th {
+    padding: 11px 16px; text-align: left; font-family: var(--mono); font-size: 9.5px;
+    letter-spacing: .12em; text-transform: uppercase; color: var(--muted);
+    border-bottom: 1px solid var(--line); background: var(--surface-2);
+  }
+  .glossary-table td { padding: 9px 16px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  .glossary-table tbody tr:last-child td { border-bottom: 0; }
+  .glossary-table tbody tr:hover { background: var(--surface-2); }
+  .glossary-table .term { font-family: var(--mono); font-size: 11.5px; color: var(--accent-ink); white-space: nowrap; }
+  .glossary-table .cn { font-size: 12.5px; color: var(--ink); white-space: nowrap; }
+  .glossary-table .meaning { font-size: 12.5px; color: var(--ink-2); }
+  .value-groups { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 9px; margin-top: 18px; }
+  .value-group { padding: 14px 16px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+  .value-group b { display: block; font-family: var(--mono); font-size: 9.5px; letter-spacing: .1em; color: var(--muted); text-transform: uppercase; }
+  .value-group span { display: block; margin-top: 5px; font-size: 12px; color: var(--ink-2); line-height: 1.55; }
+
+  /* ---------- footer ---------- */
+  .site-footer { margin-top: 100px; border-top: 1px solid var(--line); padding: 36px 0 56px; }
+  .footer-grid { display: flex; justify-content: space-between; align-items: flex-start; gap: 36px; flex-wrap: wrap; }
+  .footer-brand { max-width: 380px; }
+  .footer-brand p { margin: 10px 0 0; font-size: 12.5px; color: var(--muted); line-height: 1.6; }
+  .footer-links { display: flex; flex-wrap: wrap; gap: 8px 18px; max-width: 520px; }
+  .footer-links a { font-size: 12px; color: var(--muted); text-decoration: none; }
+  .footer-links a:hover { color: var(--accent); text-decoration: underline; text-underline-offset: 3px; }
+  .footer-meta { margin-top: 26px; padding-top: 16px; border-top: 1px dashed var(--line); display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; font-family: var(--mono); font-size: 9.5px; letter-spacing: .08em; color: var(--faint); }
+
+  /* ---------- inspector ---------- */
+  .scrim { position: fixed; inset: 0; z-index: 80; background: rgba(10, 14, 12, .45); backdrop-filter: blur(2px); animation: fade-in .2s ease; }
+  @keyframes fade-in { from { opacity: 0; } }
+  .inspector {
+    position: fixed; top: 0; right: 0; z-index: 90; height: 100dvh; width: min(450px, 100%);
+    padding: 26px 28px 40px; overflow-y: auto;
+    background: var(--surface); border-left: 1px solid var(--line);
+    box-shadow: -30px 0 70px -40px rgba(0, 0, 0, .45);
+    animation: slide-in .28s cubic-bezier(.2, .8, .2, 1);
+  }
+  @keyframes slide-in { from { transform: translateX(100%); } }
+  .inspector-close {
+    position: sticky; top: 0; float: right; z-index: 1;
+    width: 34px; height: 34px; display: grid; place-items: center;
+    border: 1px solid var(--line); border-radius: 9px; background: var(--surface); cursor: pointer; color: var(--muted);
+  }
+  .inspector-close:hover { border-color: var(--accent); color: var(--accent); }
+  .inspector .kicker { margin: 6px 0 8px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .15em; text-transform: uppercase; color: var(--accent); }
+  .inspector h2 { margin: 0; font-family: var(--serif); font-size: 30px; font-weight: 500; line-height: 1.1; letter-spacing: -.03em; }
+  .inspector .sub { margin: 8px 0 0; font-size: 13.5px; color: var(--muted); }
+  .inspector .body { margin: 18px 0 0; font-size: 13.5px; color: var(--ink-2); }
+  .inspector h3 { margin: 24px 0 7px; font-family: var(--mono); font-size: 9.5px; letter-spacing: .13em; text-transform: uppercase; color: var(--muted); }
+  .inspector ul { margin: 0; padding-left: 17px; }
+  .inspector li { margin: 5px 0; font-size: 13px; color: var(--ink-2); }
+  .inspector .tags { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 22px; }
+  .inspector .path { margin-top: 18px; padding: 9px 12px; border-radius: 8px; background: var(--surface-2); border: 1px solid var(--line); font-family: var(--mono); font-size: 11px; color: var(--muted); word-break: break-all; }
+  .inspector .path b { display: block; margin-bottom: 3px; font-family: var(--mono); font-size: 8.5px; letter-spacing: .12em; color: var(--faint); text-transform: uppercase; }
+  body.inspector-open { overflow: hidden; }
+
+  /* ---------- reveal ---------- */
+  .reveal { opacity: 1; }
+
+  /* ---------- responsive ---------- */
+  @media (max-width: 1080px) {
+    .hero-grid { grid-template-columns: 1fr; gap: 36px; }
+    .principle-card { max-width: 560px; }
+    .section-head { grid-template-columns: 1fr; gap: 14px; }
+    .section-num::after { width: 26px; }
+    .concept-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .rules { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+    .value-groups { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  }
+  @media (max-width: 820px) {
+    .wrap { width: calc(100% - 34px); }
+    .site-nav { display: none; }
+    .hero { padding-top: 50px; }
+    .stats { grid-template-columns: repeat(2, 1fr); margin-top: 48px; }
+    .stat { padding: 16px 20px; }
+    .stat:nth-child(3) { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); }
+    .stat:nth-child(4) { border-top: 1px solid var(--line); }
+    .section { padding-top: 70px; }
+    .stage { padding: 22px; border-radius: 18px; }
+    .stage-top { align-items: flex-start; flex-direction: column; gap: 8px; }
+    .layer { grid-template-columns: 1fr; gap: 12px; padding: 17px 18px; }
+    .layer-head { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+    .layer-head h3 { margin: 0; }
+    .layer-body { gap: 7px; grid-template-columns: repeat(auto-fit, minmax(178px, 1fr)); }
+    .comp { min-width: 0; }
+    .concept-grid { grid-template-columns: 1fr; }
+    .callout, .split { grid-template-columns: 1fr; }
+    .stage-row { grid-template-columns: 1fr; gap: 3px; padding: 13px 16px; }
+    .stage-row .label { text-align: left; }
+    .rejected { grid-template-columns: 1fr; }
+    .rejected div:nth-child(odd) { border-right: 0; }
+    .rules { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .value-groups { grid-template-columns: 1fr; }
+    .footer-grid { flex-direction: column; gap: 20px; }
+    .inspector { padding: 20px 22px 36px; }
+  }
+  @media (max-width: 520px) {
+    .brand-text small { display: none; }
+    h1 { font-size: clamp(40px, 13vw, 58px); }
+    .stats { grid-template-columns: 1fr; }
+    .stat { border-left: 0; padding-left: 0; border-top: 1px solid var(--line); }
+    .stat:first-child { border-top: 0; }
+    .rules { grid-template-columns: 1fr; }
+    .comp { min-width: 0; }
+    .node:not(:last-child)::after { display: none; }
+    .ribbon { gap: 12px; min-width: 840px; }
+    .result-count { margin-left: 0; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: .001ms !important; transition-duration: .001ms !important; }
+    .js .reveal { opacity: 1; transform: none; }
+  }
+  @media print {
+    .site-header, .hero-actions, .tabs, .filter-bar, .theme-toggle, .scrim, .inspector, .skip { display: none !important; }
+    body { background: #fff; color: #000; }
+    .stage { box-shadow: none; }
+    .js .reveal { opacity: 1; transform: none; }
+    .section { padding-top: 36px; page-break-inside: avoid; }
+  }
+</style>
+</head>
+<body>
+<a class="skip" href="#main">跳到正文</a>
+
+<svg class="sprite" aria-hidden="true" xmlns="http://www.w3.org/2000/svg">
+  <symbol id="i-source" viewBox="0 0 24 24"><circle cx="12" cy="12" r="2"/><path d="M7.5 7.5a6.4 6.4 0 0 0 0 9M16.5 7.5a6.4 6.4 0 0 1 0 9M4.5 4.5a10.6 10.6 0 0 0 0 15M19.5 4.5a10.6 10.6 0 0 1 0 15"/></symbol>
+  <symbol id="i-trigger" viewBox="0 0 24 24"><path d="M13 2 4.5 13.5h6L11 22l8.5-11.5h-6L13 2Z"/></symbol>
+  <symbol id="i-thread" viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-8 8H7l-4 3v-8a8 8 0 0 1 8-8h2a8 8 0 0 1 8 8Z"/><path d="M8 10h8M8 14h5"/></symbol>
+  <symbol id="i-eval" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6l-7-3Z"/><path d="m9 12 2 2 4-4"/></symbol>
+  <symbol id="i-ticket" viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 1 2-2h12a2 2 0 0 1 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2v-2a2 2 0 0 0 0-4V8Z"/><path d="M12 6v2M12 11v2M12 16v2"/></symbol>
+  <symbol id="i-executor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="m7 9 3 3-3 3M13 15h4"/></symbol>
+  <symbol id="i-channel" viewBox="0 0 24 24"><path d="M4 12h13M13 6l6 6-6 6"/><path d="M4 5v14"/></symbol>
+  <symbol id="i-store" viewBox="0 0 24 24"><ellipse cx="12" cy="5.5" rx="8" ry="3"/><path d="M4 5.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6M4 11.5v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></symbol>
+  <symbol id="i-policy" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6l-7-3Z"/><path d="M9 12h6M12 9v6"/></symbol>
+  <symbol id="i-runtime" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+  <symbol id="i-session" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3.5"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M4.9 4.9l2.1 2.1M17 17l2.1 2.1M19.1 4.9 17 7M7 17l-2.1 2.1"/></symbol>
+  <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 9h18M9 9v11"/></symbol>
+  <symbol id="i-effects" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
+  <symbol id="i-outbox" viewBox="0 0 24 24"><path d="M4 13v5a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-5"/><path d="M4 13l2.5-7.5A2 2 0 0 1 8.4 4h7.2a2 2 0 0 1 1.9 1.5L20 13h-5l-1.5 2h-3L9 13H4Z"/></symbol>
+  <symbol id="i-health" viewBox="0 0 24 24"><path d="M3 12h4l2-6 4 12 2-6h6"/></symbol>
+  <symbol id="i-hex" viewBox="0 0 24 24"><path d="M12 2 20 7v10l-8 5-8-5V7l8-5Z"/><circle cx="12" cy="12" r="3"/></symbol>
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-4-4"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9 17.7 6.3M6.3 17.7l-1.4 1.4"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8.5 8.5 0 0 1 9.5 4a8.5 8.5 0 1 0 10.5 10.5Z"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></symbol>
+  <symbol id="i-shield" viewBox="0 0 24 24"><path d="M12 3 5 6v6c0 4.4 3 7.4 7 9 4-1.6 7-4.6 7-9V6l-7-3Z"/></symbol>
+  <symbol id="i-layers" viewBox="0 0 24 24"><path d="m12 3 9 5-9 5-9-5 9-5Z"/><path d="m3 12 9 5 9-5M3 16l9 5 9-5"/></symbol>
+  <symbol id="i-lock" viewBox="0 0 24 24"><rect x="5" y="10" width="14" height="11" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+</svg>
+
+<header class="site-header">
+  <div class="wrap header-inner">
+    <a class="brand" href="#top" aria-label="回到页面顶部">
+      <span class="brand-mark"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-hex"/></svg></span>
+      <span class="brand-text"><b>dsh-superagent</b><small>architecture overview</small></span>
+    </a>
+    <nav class="site-nav" aria-label="页面导航">
+      <a href="#overview">全景</a>
+      <a href="#flows">流转</a>
+      <a href="#domain">领域</a>
+      <a href="#lifecycle">生命周期</a>
+      <a href="#modules">模块</a>
+      <a href="#glossary">术语</a>
+    </nav>
+    <button class="theme-toggle" id="theme-toggle" type="button" aria-label="切换浅色 / 深色主题" title="切换主题">
+      <svg class="icon icon-sun" aria-hidden="true"><use href="#i-sun"/></svg>
+      <svg class="icon icon-moon" aria-hidden="true"><use href="#i-moon"/></svg>
+    </button>
+  </div>
+</header>
+
+<main id="main">
+  <section class="hero wrap" id="top">
+    <div class="hero-grid">
+      <div>
+        <p class="eyebrow"><span class="pulse"></span>DSH-SUPERAGENT · ARCHITECTURE OVERVIEW</p>
+        <h1>超级 Agent 的<br><span class="accent">架构全景</span></h1>
+        <p class="lede">一个面向单个仓库的主动式编码 agent。它从 Feishu 消息与 GitHub 事件中接单，在自己的 Session 与目录里完成工作，最后把可评审的 Pull Request 交回给人。</p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="#overview">查看系统全景 <svg class="icon" aria-hidden="true"><use href="#i-arrow"/></svg></a>
+          <a class="btn" href="#domain">浏览领域模型</a>
+        </div>
+      </div>
+      <aside class="principle-card" aria-label="设计原则">
+        <p class="card-kicker">Design principle</p>
+        <blockquote>Take as little human attention as possible, and give as much value as possible.</blockquote>
+        <p class="translation">尽量少占用人的注意力，尽量多交付价值。</p>
+        <ul>
+          <li>被请求或书面规则允许时才行动</li>
+          <li>只在有结果、需要决策或无法完成时说话</li>
+          <li>先成为可评审的 PR，由人决定是否合并</li>
+        </ul>
+      </aside>
+    </div>
+    <div class="stats">
+      <div class="stat"><b>2</b><span>Source 接入 · Feishu / GitHub</span></div>
+      <div class="stat"><b>5</b><span>架构层 · 从接入到运行支撑</span></div>
+      <div class="stat"><b>7</b><span>工单阶段 · 首个匹配生效</span></div>
+      <div class="stat"><b><em>1</em></b><span>SQLite 状态库 · 单一写入者</span></div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="overview">
+    <div class="section-head reveal">
+      <div class="section-num">01 / OVERVIEW</div>
+      <div>
+        <h2>从事件到交付的系统全景</h2>
+        <p>Source 负责接入，Engine 负责授权与状态，Session 负责判断与执行，Outbox 负责把结果写回对话。六段主链路，串起一次完整的授权工作。</p>
+      </div>
+    </div>
+
+    <div class="stage reveal">
+      <div class="stage-top">
+        <div>
+          <p class="stage-kicker">Main pipeline</p>
+          <p class="stage-title">一条请求的六段旅程</p>
+        </div>
+        <p class="stage-hint">点击节点查看职责 · 窄屏左右滑动查看完整链路</p>
+      </div>
+      <div class="ribbon-scroll">
+        <div class="ribbon">
+          <button class="node" type="button" data-inspect="feishu">
+            <span class="node-index">01 / SOURCE</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-source"/></svg>
+            <span class="node-title">来源接入</span>
+            <span class="node-sub">Feishu 群聊与话题、GitHub Issue / PR / CI，翻译成统一事件</span>
+          </button>
+          <button class="node" type="button" data-inspect="intake">
+            <span class="node-index">02 / TRIGGER</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-trigger"/></svg>
+            <span class="node-title">触发落库</span>
+            <span class="node-sub">幂等存储、记录去向、归属 Thread，并向订阅的工单扇出</span>
+          </button>
+          <button class="node" type="button" data-inspect="evals">
+            <span class="node-index">03 / EVAL</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-eval"/></svg>
+            <span class="node-title">授权研判</span>
+            <span class="node-sub">Gate 判断准入强度，模型按规则研判意图，产出 Decision</span>
+          </button>
+          <button class="node" type="button" data-inspect="tickets">
+            <span class="node-index">04 / TICKET</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-ticket"/></svg>
+            <span class="node-title">工单授权</span>
+            <span class="node-sub">Mandate 记录范围与策略版本；订阅原对话，接收后续消息</span>
+          </button>
+          <button class="node" type="button" data-inspect="executor">
+            <span class="node-index">05 / EXECUTOR</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-executor"/></svg>
+            <span class="node-title">执行交付</span>
+            <span class="node-sub">每工单一个 Session 与目录，实现、自审、跑检查、打开 PR</span>
+          </button>
+          <button class="node" type="button" data-inspect="outbox">
+            <span class="node-index">06 / CHANNEL</span>
+            <svg class="icon" aria-hidden="true"><use href="#i-channel"/></svg>
+            <span class="node-title">结果写回</span>
+            <span class="node-sub">确认、回答、结果与提问，经 Outbox 回到原对话；人评审并合并</span>
+          </button>
+        </div>
+      </div>
+      <div class="stage-legend" aria-hidden="true">
+        <span><i></i>事件进入</span>
+        <span><i></i>授权与状态</span>
+        <span><i></i>结果写回</span>
+      </div>
+    </div>
+
+    <div class="layers">
+      <article class="layer reveal" style="--c: var(--blue)">
+        <header class="layer-head">
+          <span class="layer-num">LAYER 01</span>
+          <h3>接入层</h3>
+          <p>Sources</p>
+        </header>
+        <div class="layer-body">
+          <button class="comp" type="button" data-inspect="feishu"><strong>Feishu Source</strong><span>实时事件、历史恢复、话题轮询；bot 身份</span></button>
+          <button class="comp" type="button" data-inspect="github"><strong>GitHub Source</strong><span>通知、订阅的 Issue / PR、CI、review thread；gh 身份</span></button>
+          <button class="comp" type="button" data-inspect="registry"><strong>SourceRegistry</strong><span>注册 kind 与实例，统一 scope、channel、健康项</span></button>
+          <button class="comp" type="button" data-inspect="source-context"><strong>SourceContext</strong><span>插件唯一写入口；读取位置、Thread meta、健康上报</span></button>
+        </div>
+      </article>
+
+      <article class="layer reveal" style="--c: var(--amber)">
+        <header class="layer-head">
+          <span class="layer-num">LAYER 02</span>
+          <h3>领域核心</h3>
+          <p>src/core</p>
+        </header>
+        <div class="layer-body">
+          <button class="comp" type="button" data-inspect="engine"><strong>Engine</strong><span>唯一写入者；一个入口，五个内部部件，命令同步执行</span></button>
+          <button class="comp" type="button" data-inspect="intake"><strong>Intake</strong><span>幂等落库、Thread 归属、订阅扇出、排队评估</span></button>
+          <button class="comp" type="button" data-inspect="evals"><strong>Evals</strong><span>批量、Gate 强度、候选、超时与 Decision</span></button>
+          <button class="comp" type="button" data-inspect="tickets"><strong>Tickets</strong><span>工单生命周期、Mandate、订阅、恢复与结束</span></button>
+          <button class="comp" type="button" data-inspect="assignments"><strong>Assignments</strong><span>执行器启动、输入投递、报告与中断事实</span></button>
+          <button class="comp" type="button" data-inspect="replies"><strong>Replies</strong><span>确认、回答、结果、提问四种 Channel 写入</span></button>
+          <button class="comp" type="button" data-inspect="policy"><strong>Policy</strong><span>版本、准入、规则匹配、Mandate 重校验</span></button>
+          <button class="comp" type="button" data-inspect="store"><strong>Store</strong><span>单 SQLite；仓储、只读查询、回执与 KV</span></button>
+        </div>
+      </article>
+
+      <article class="layer reveal" style="--c: var(--violet); --layer-cols: 5">
+        <header class="layer-head">
+          <span class="layer-num">LAYER 03</span>
+          <h3>智能层</h3>
+          <p>Sessions &amp; prompts</p>
+        </header>
+        <div class="layer-body">
+          <button class="comp" type="button" data-inspect="main-session"><strong>Main Session</strong><span>编排与研判；14 个应用工具；router preset</span></button>
+          <button class="comp" type="button" data-inspect="assessor"><strong>MasterAssessor</strong><span>有界上下文、评估 schema、候选缓存</span></button>
+          <button class="comp" type="button" data-inspect="worker-session"><strong>Worker Session</strong><span>实现与验证；6 个应用工具；worker preset</span></button>
+          <button class="comp" type="button" data-inspect="prompts"><strong>Prompts</strong><span>内置部件、团队覆盖、版本与预览</span></button>
+          <button class="comp" type="button" data-inspect="skills"><strong>Skills</strong><span>GitHub / Feishu 的操作手册，按需加载</span></button>
+        </div>
+      </article>
+
+      <article class="layer reveal" style="--c: var(--accent); --layer-cols: 5">
+        <header class="layer-head">
+          <span class="layer-num">LAYER 04</span>
+          <h3>执行与投递</h3>
+          <p>Execution &amp; effects</p>
+        </header>
+        <div class="layer-body">
+          <button class="comp" type="button" data-inspect="executor"><strong>DshExecutor</strong><span>每工单 Session + 目录；启动、投递、恢复</span></button>
+          <button class="comp" type="button" data-inspect="slots"><strong>WorkerSlots</strong><span>并发槽位；人的消息可多用一槽</span></button>
+          <button class="comp" type="button" data-inspect="effects"><strong>Effects</strong><span>持久副作用队列：评估、启动、投递、转达、通知、回复</span></button>
+          <button class="comp" type="button" data-inspect="outbox"><strong>Outbox</strong><span>消息回执、顺序、重试、撤回与丢弃</span></button>
+          <button class="comp" type="button" data-inspect="channels"><strong>Channels</strong><span>Feishu 话题回复、GitHub 评论与 review thread</span></button>
+        </div>
+      </article>
+
+      <article class="layer reveal" style="--c: var(--rose); --layer-cols: 5">
+        <header class="layer-head">
+          <span class="layer-num">LAYER 05</span>
+          <h3>运行支撑</h3>
+          <p>Runtime &amp; panel</p>
+        </header>
+        <div class="layer-body">
+          <button class="comp" type="button" data-inspect="runtime"><strong>Runtime</strong><span>组合根；锁目录、启动、关闭；注册路由</span></button>
+          <button class="comp" type="button" data-inspect="passes"><strong>Passes</strong><span>每 2 秒一轮：先做副作用，再评估到期工作</span></button>
+          <button class="comp" type="button" data-inspect="settings"><strong>Settings</strong><span>版本化设置块；Policy 变更通知受影响工单</span></button>
+          <button class="comp" type="button" data-inspect="panel"><strong>Panel / API</strong><span>只显示需要人的事项；同源管理 API</span></button>
+          <button class="comp" type="button" data-inspect="health"><strong>HealthBoard</strong><span>每个部件一项健康，单一认领，三次失败上报</span></button>
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="section wrap" id="flows">
+    <div class="section-head reveal">
+      <div class="section-num">02 / FLOWS</div>
+      <div>
+        <h2>三条路径，一套边界</h2>
+        <p>明确请求、订阅后续与主动候选走不同的准入路径，但都汇入同一套 Engine 规则与工单生命周期。</p>
+      </div>
+    </div>
+
+    <div class="tabs" role="tablist" aria-label="请求路径">
+      <button class="tab" id="tab-request" type="button" role="tab" aria-selected="true" aria-controls="panel-request">明确请求</button>
+      <button class="tab" id="tab-followup" type="button" role="tab" aria-selected="false" aria-controls="panel-followup" tabindex="-1">后续消息</button>
+      <button class="tab" id="tab-proactive" type="button" role="tab" aria-selected="false" aria-controls="panel-proactive" tabindex="-1">主动工作</button>
+    </div>
+
+    <div class="flow-panel is-active" id="panel-request" role="tabpanel" aria-labelledby="tab-request" tabindex="0">
+      <h3>新请求：从一条消息到一次可评审的交付</h3>
+      <p class="flow-lede">当名单内的人直接点名 agent，Source 只负责把事件带进来；接单、授权、派工与确认在同一个事务里完成。</p>
+      <ol class="timeline">
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">01</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag source">Source</span><span class="mono">进入领域</span></div>
+            <h4>接入与过滤</h4>
+            <p>Feishu 点名或 GitHub Issue 指向 agent。Source 丢弃自己的消息、读取窗口之外的事件，把其余事件作为 Trigger 幂等落库。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">02</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Eval</span><span class="mono">Gate</span></div>
+            <h4>确定性准入</h4>
+            <p>Gate 检查发送者、Source 的允许名单与 Thread 上下文。被允许的人明确点名即成为 explicit 候选，无需模型研判；其余情况进入评估或直接记录忽略。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">03</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Decision</span><span class="mono">accept</span></div>
+            <h4>接单并授予 Mandate</h4>
+            <p>主 Session 用 <span class="mono">orchestrator_route</span> 接受。Engine 在同一事务里创建 Ticket、Mandate、首个 Assignment、Thread 订阅与确认消息。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">04</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag exec">Executor</span><span class="mono">launch</span></div>
+            <h4>准备目录，启动 Worker</h4>
+            <p>launch 副作用运行 prepare 命令并创建 <span class="mono">worker-&lt;ticket id&gt;</span> Session。首条消息带工单标题、任务文本、来源卡片与授权边界。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">05</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag exec">Worker</span><span class="mono">work → PR</span></div>
+            <h4>实现、验证、交付</h4>
+            <p>Worker 在自己的目录里完成改动、自审并运行相关检查，然后推送分支、打开 PR。PR 被绑定为工单的 Thread；报告 <span class="mono">ready</span> 表示等待评审。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="accent">
+          <div class="tl-marker">06</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag deliver">Channel</span><span class="mono">result</span></div>
+            <h4>写回原对话，等人合并</h4>
+            <p>主 Session 把结果与 PR 链接发回请求所在对话。人评审并合并；PR 关闭后，工单在所有跟踪的 PR 结束后以 merged / closed 收尾，并保留订阅以便后续消息恢复。</p>
+            <div class="tl-note">在这个部署里，agent 不自行合并；没有指定 merge CLI 时，由人合并 PR。</div>
+          </div>
+        </li>
+      </ol>
+      <div class="flow-foot"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg><span>接单的原子性是关键：Ticket、Mandate、Assignment、确认消息要么一起出现，要么都不出现。重放同一个 Trigger 不会产生第二张工单。</span></div>
+    </div>
+
+    <div class="flow-panel" id="panel-followup" role="tabpanel" aria-labelledby="tab-followup" tabindex="0">
+      <h3>后续消息：订阅扇出，不重新授权</h3>
+      <p class="flow-lede">对话一旦与工单绑定，之后的消息会直接到达该工单；它携带上下文，但不自动扩大授权范围。</p>
+      <ol class="timeline">
+        <li class="tl-item" data-tone="amber">
+          <div class="tl-marker">01</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag source">Subscription</span><span class="mono">fan-out</span></div>
+            <h4>消息直达工单</h4>
+            <p>Thread 上的新消息（包括 bot 与 CI）会扇出到所有仍在订阅的工单，不经过 Gate。订阅只传递上下文，授予新权限的仍是 Mandate。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="amber">
+          <div class="tl-marker">02</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag exec">Ownership</span><span class="mono">no Eval</span></div>
+            <h4>由 Executor 判断归属</h4>
+            <p>人的消息到达工单后由该工单的 Executor 决定：在范围内就继续执行；超出范围或属于另一张工单，则交回一次，等没有其他工单拥有它时再进入新的 Eval。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="amber">
+          <div class="tl-marker">03</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Input</span><span class="mono">delivery</span></div>
+            <h4>作为 Input 投递</h4>
+            <p>消息被渲染成 Input，按顺序投递给运行中的 Assignment。人直接写消息可以多用一槽，优先于新的启动，保证已有工作不被新任务挡住。</p>
+          </div>
+        </li>
+        <li class="tl-item" data-tone="amber">
+          <div class="tl-marker">04</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Lifecycle</span><span class="mono">resume</span></div>
+            <h4>结束后仍可恢复</h4>
+            <p>已结束的工单保留订阅。人的消息可以按原 Mandate 恢复它，但恢复前要按当前 Policy 重校验；被明确 stop 的工单不再接收任何消息。</p>
+            <div class="tl-note">工单结束时，未被确认、回答或交回的消息会回到 Eval；已读但没有后续动作的消息（例如感谢）不会。</div>
+          </div>
+        </li>
+      </ol>
+    </div>
+
+    <div class="flow-panel" id="panel-proactive" role="tabpanel" aria-labelledby="tab-proactive" tabindex="0">
+      <h3>主动工作：先研判，再接受</h3>
+      <p class="flow-lede">未点名消息、bot 消息或名单外成员的请求按准入规则与 accept mode 处理；bot 使用 Source 的 bot 名单。默认 observe，只记录“会接受”，不真正开工。</p>
+      <ol class="timeline">
+        <li class="tl-item">
+          <div class="tl-marker">01</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag source">Admission</span><span class="mono">inferred</span></div>
+            <h4>形成推断候选</h4>
+            <p>Gate 依据接收范围、是否点名与 Source 的 bot 名单给出 inferred 强度；accept mode 为 off 时推断工作完全不进入候选。</p>
+          </div>
+        </li>
+        <li class="tl-item">
+          <div class="tl-marker">02</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Assessment</span><span class="mono">orchestrator_eval</span></div>
+            <h4>模型研判意图</h4>
+            <p>主 Session 读取有界的 Thread 上下文、相关工单与当前 Policy，对每条启用规则逐一判断是否匹配，并给出意图证据。</p>
+          </div>
+        </li>
+        <li class="tl-item">
+          <div class="tl-marker">03</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Mode</span><span class="mono">observe / auto</span></div>
+            <h4>接受或记录</h4>
+            <p>auto 模式下，满足规则的正面判断可直接接单；observe 模式把它记录为 “would accept”；无规则匹配则忽略。每次判断都绑定当时的 Policy 版本。</p>
+          </div>
+        </li>
+        <li class="tl-item">
+          <div class="tl-marker">04</div>
+          <div class="tl-body">
+            <div class="tl-meta"><span class="tag core">Mandate</span><span class="mono">rules</span></div>
+            <h4>把规则带进工单</h4>
+            <p>命中的规则写入 Mandate，Executor 收到规则名称与限制。规则可以覆盖默认的流程与沟通要求，例如静默、指定评审人、合并前审批。</p>
+            <div class="tl-note">人明确 stop 才撤销 Mandate；Policy 变更只通知受影响工单并重新排评估，不会中断正在做的工作。</div>
+          </div>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="section wrap" id="domain">
+    <div class="section-head reveal">
+      <div class="section-num">03 / DOMAIN</div>
+      <div>
+        <h2>十一个概念，各自守住一条规则</h2>
+        <p>Source、Thread、Eval、Mandate 与 Subscription 构成核心；其余概念围绕授权与执行。代码、工具、面板与文档都只说这些词。</p>
+      </div>
+    </div>
+
+    <div class="concept-grid">
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Source</span><span class="concept-cn">来源</span></div>
+        <h3>事件流</h3>
+        <p>一种可复用的 kind，加一份实例配置：是否运行、监听什么。它知道如何把外部事件翻译成 Trigger。</p>
+        <div class="rule"><b>规则：</b>保存读取位置与自己的 bot 身份；重启不重放事件。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Trigger</span><span class="concept-cn">触发</span></div>
+        <h3>不可变事件</h3>
+        <p>一次事件及其 Source 元数据，例如发起者。它是审计与幂等的单位。</p>
+        <div class="rule"><b>规则：</b>归属于一个或多个 Thread；同一个 Trigger 接受两次只产生一张工单。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Thread</span><span class="concept-cn">线程</span></div>
+        <h3>按时间排列的对话</h3>
+        <p>由 Source 定义哪些 Trigger 属于同一条 Thread。它持有订阅、运行中的 Eval 与 Decision 历史。</p>
+        <div class="rule"><b>规则：</b>同一时刻最多一个 Eval；一条 Thread 可以有多张工单。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Correlation</span><span class="concept-cn">关联</span></div>
+        <h3>Thread 之间的关系</h3>
+        <p>同一个 Trigger 出现在多条 Thread 上时产生的联系，用来补充上下文。</p>
+        <div class="rule"><b>规则：</b>只添加上下文，永远不负责路由。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Channel</span><span class="concept-cn">渠道</span></div>
+        <h3>Thread 的写侧</h3>
+        <p>Source 定义可回复的地址；一条 Thread 可以有多个 Channel，一张工单持有一组。</p>
+        <div class="rule"><b>规则：</b>确认、回答、PR 与已解决的 review 都是 Channel 写入。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Policy</span><span class="concept-cn">策略</span></div>
+        <h3>版本化的授权规则</h3>
+        <p>研判规则、accept mode，以及每个 Source 的部分：谁可以发起、bot 名单、admission table。</p>
+        <div class="rule"><b>规则：</b>规则变更会重排 Eval；影响工单的变更会送达其 Assignment，但不撤销 Mandate。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Eval</span><span class="concept-cn">评估</span></div>
+        <h3>两层研判</h3>
+        <p>Gate 做确定性准入，Assessment 让模型按规则判断意图；输出一个 Decision。</p>
+        <div class="rule"><b>规则：</b>无状态；输入是 Trigger 批次、Thread 快照、全部相关工单与当前 Policy。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Mandate</span><span class="concept-cn">授权</span></div>
+        <h3>接受时授予的范围</h3>
+        <p>记录 Policy 版本、范围、强度、命中规则、发送者身份与准入路径。</p>
+        <div class="rule"><b>规则：</b>不可变。只有人的 stop 能撤回，或重校验失败时失效；扩大范围要新工单。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Ticket</span><span class="concept-cn">工单</span></div>
+        <h3>授权工作的单位</h3>
+        <p>引用 Mandate，持有 Channel、Input 与 Assignment；定义自己的 open / ended 状态。</p>
+        <div class="rule"><b>规则：</b>只有 Eval 能创建；人的消息可以恢复已结束工单，除非被 stop。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Assignment</span><span class="concept-cn">派工</span></div>
+        <h3>工单与执行器的绑定</h3>
+        <p>一张工单先后可以有多个 Assignment；执行器在领域之外，通过它连接进来。</p>
+        <div class="rule"><b>规则：</b>pending → running → ended，独立于工单；只有最终报告能从执行器一侧结束工单。</div>
+      </article>
+      <article class="concept reveal">
+        <div class="concept-top"><span class="concept-en">Subscription</span><span class="concept-cn">订阅</span></div>
+        <h3>工单与 Thread 的多对多关系</h3>
+        <p>由 Thread 持有。匹配的消息扇出到每张在线工单，不检查发送者。</p>
+        <div class="rule"><b>规则：</b>已结束工单保留订阅；bot 与 CI 不唤醒它。</div>
+      </article>
+    </div>
+
+    <div class="callout">
+      <div class="note reveal"><strong>人不是领域概念</strong>Trigger 只携带 Source 给出的发起者标识。允许名单是 Source 的 Policy 部分；同一个人在不同 Source 上的账号，是 agent 阅读的提示文本，而不是实体映射。</div>
+      <div class="note reveal"><strong>执行器在领域之外</strong>Executor 的 Session、目录与进程不属于领域模型，只通过 Assignment 与工单相连。这样工单可以换执行器、被恢复或被多次派工。</div>
+    </div>
+
+    <details class="more reveal">
+      <summary>设计里刻意没有的东西</summary>
+      <div class="rejected">
+        <div><b>Principal / Membership 实体</b>人是 Trigger 元数据；跨 Source 的身份映射只是提示文本。</div>
+        <div><b>“追加到工单”的 Decision</b>追加剧是订阅扇出，不需要 Eval。</div>
+        <div><b>Eval 自己等待</b>需要等待的条件属于 Source；Eval 不反向依赖 Source。</div>
+        <div><b>每条 Thread 最多一张工单</b>一条 Thread 可以承载多项独立工作，由研判避免重复。</div>
+        <div><b>Ticket 状态跟随 DSH Session</b>工单可被移交、恢复或多个 Executor 执行，必须自己定义状态。</div>
+        <div><b>Policy 变更时取消运行中工单</b>取消会留下半成品；变更被记录并送达，而不是撤回授权。</div>
+      </div>
+    </details>
+  </section>
+
+  <section class="section wrap" id="lifecycle">
+    <div class="section-head reveal">
+      <div class="section-num">04 / LIFECYCLE</div>
+      <div>
+        <h2>工单此刻在等谁</h2>
+        <p>每张打开的工单只有一个阶段，由它在等待的东西决定。从上往下读，第一个匹配的行生效；person 阶段意味着缺少人的输入就无法继续。</p>
+      </div>
+    </div>
+
+    <div class="stage-table reveal" role="table" aria-label="工单阶段">
+      <div class="stage-row person" role="row"><span class="code" role="cell"><i></i>person / delivery</span><span class="cond" role="cell">Input 投递失败，2 秒后重试，随后指数退避至 1 分钟</span><span class="label" role="cell">输入未送达</span></div>
+      <div class="stage-row person" role="row"><span class="code" role="cell"><i></i>person / answer</span><span class="cond" role="cell">工单上有一个结构化的 Attention</span><span class="label" role="cell">等待回答</span></div>
+      <div class="stage-row person" role="row"><span class="code" role="cell"><i></i>person / review</span><span class="cond" role="cell">最新报告是 ready</span><span class="label" role="cell">等待评审</span></div>
+      <div class="stage-row person" role="row"><span class="code" role="cell"><i></i>person / blocked · failed</span><span class="cond" role="cell">最新报告是 blocked 或 failed，且此后没有人的消息到达</span><span class="label" role="cell">受阻 · 失败</span></div>
+      <div class="stage-row work" role="row"><span class="code" role="cell"><i></i>working / queued</span><span class="cond" role="cell">没有 Assignment，或 Assignment 仍为 pending</span><span class="label" role="cell">排队中</span></div>
+      <div class="stage-row idle" role="row"><span class="code" role="cell"><i></i>idle</span><span class="cond" role="cell">最新报告是 waiting，或 Assignment 已结束</span><span class="label" role="cell">等待触发</span></div>
+      <div class="stage-row work" role="row"><span class="code" role="cell"><i></i>working</span><span class="cond" role="cell">其余情况</span><span class="label" role="cell">执行中</span></div>
+    </div>
+    <p class="stage-note"><svg class="icon" aria-hidden="true"><use href="#i-info"/></svg>人的新消息会释放 blocked / failed 工单；空闲工单等待订阅 Thread 上的触发器，而不是轮询。</p>
+
+    <div class="split">
+      <div class="panel-card reveal">
+        <h3>工单如何结束</h3>
+        <p>结束由事实决定，而不是由 Executor 自称完成。</p>
+        <ul class="end-list">
+          <li><code>completed</code><span>没有 PR 的工作报告 ready，直接完成。</span></li>
+          <li><code>dropped</code><span>没有需要人处理的工作，例如无法复现或已被取代；通常不发消息。</span></li>
+          <li><code>merged</code><span>跟踪的 PR 全部结束，且最后一次关闭是合并。</span></li>
+          <li><code>closed</code><span>跟踪的 PR 全部结束，最后一次关闭不是合并。</span></li>
+          <li><code>stopped</code><span>人明确停止，Mandate 撤回，工单不再接收任何消息。</span></li>
+        </ul>
+        <div class="report-states" aria-label="报告状态">
+          <span class="state-pill progress"><i></i>progress</span>
+          <span class="state-pill waiting"><i></i>waiting</span>
+          <span class="state-pill ready"><i></i>ready</span>
+          <span class="state-pill blocked"><i></i>blocked</span>
+          <span class="state-pill failed"><i></i>failed</span>
+          <span class="state-pill dropped"><i></i>dropped</span>
+        </div>
+      </div>
+      <div class="panel-card reveal">
+        <h3>失败、恢复与暂停</h3>
+        <p>工单状态来自存储的事实，所以重启后仍然成立。</p>
+        <ul class="end-list">
+          <li><code>blocked / failed</code><span>暂停自动 Input，但工具仍可用；人可以直接在 Session 里继续。</span></li>
+          <li><code>retry</code><span>在同一 Session、目录、分支与 PR 上开始新的 Assignment。</span></li>
+          <li><code>restart</code><span>中断的 Assignment 带恢复说明重启；等待、就绪、受阻或失败的报告保持原状。</span></li>
+          <li><code>pause</code><span>暂停派工、新 Eval、投递与回复；已在进行的 turn 不被打断。</span></li>
+          <li><code>resume</code><span>人的消息按当前 Policy 重校验 Mandate；通过后恢复，失败则消息回到 Eval。</span></li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="modules">
+    <div class="section-head reveal">
+      <div class="section-num">05 / MODULES</div>
+      <div>
+        <h2>代码落在哪里</h2>
+        <p>核心只依赖自身的类型与 Node 的哈希；Source 不导入 app；每个状态只有一个写入者。下表是阅读代码的索引，完整清单见架构文档。</p>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <div class="search-box">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="module-search" type="search" placeholder="搜索模块或职责…" aria-label="搜索模块或职责">
+      </div>
+      <button class="chip" type="button" data-layer="all" aria-pressed="true">全部</button>
+      <button class="chip" type="button" data-layer="core" aria-pressed="false">core</button>
+      <button class="chip" type="button" data-layer="app" aria-pressed="false">app</button>
+      <button class="chip" type="button" data-layer="executor" aria-pressed="false">executor</button>
+      <button class="chip" type="button" data-layer="sources" aria-pressed="false">sources</button>
+      <button class="chip" type="button" data-layer="infra" aria-pressed="false">infra</button>
+      <button class="chip" type="button" data-layer="client" aria-pressed="false">client</button>
+      <button class="chip" type="button" data-layer="deploy" aria-pressed="false">deploy</button>
+      <span class="result-count" id="module-count" aria-live="polite"></span>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table class="modules">
+        <thead>
+          <tr><th scope="col">路径</th><th scope="col">层</th><th scope="col">职责</th></tr>
+        </thead>
+        <tbody id="module-rows">
+          <tr data-layer="core"><td><code>src/core/engine.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">核心入口与角色化接口；唯一写入者，负责每个命令的事务</td></tr>
+          <tr data-layer="core"><td><code>src/core/model.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">领域类型、Ticket 字段与共享判定：waitsForPerson、followupOwners、settled</td></tr>
+          <tr data-layer="core"><td><code>src/core/ports.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">Repositories、Policy、SourceScope、Assessor、Executor、Outbox 与领域事件</td></tr>
+          <tr data-layer="core"><td><code>src/core/intake.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">Trigger 幂等落库、Thread 归属、订阅扇出与排队评估</td></tr>
+          <tr data-layer="core"><td><code>src/core/evals.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">每 Thread 的批量评估、Gate 强度、候选、超时与 Decision</td></tr>
+          <tr data-layer="core"><td><code>src/core/tickets.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">工单生命周期、Mandate、订阅、Input、恢复与结束</td></tr>
+          <tr data-layer="core"><td><code>src/core/assignments.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">启动、投递、读取、报告、中断等执行器事实</td></tr>
+          <tr data-layer="core"><td><code>src/core/replies.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">确认、回答、结果、提问四类 Channel 写入及其规则</td></tr>
+          <tr data-layer="core"><td><code>src/core/stage.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">ticketStage 与 canRetry：工单阶段的唯一实现</td></tr>
+          <tr data-layer="core"><td><code>src/policy.ts</code></td><td><span class="layer-pill">core</span></td><td class="desc">设置 schema、Policy 版本、Gate、Mandate 重校验与 policyEffects</td></tr>
+          <tr data-layer="app"><td><code>src/app/runtime.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">组合根：锁目录、打开 Store、构建部件、启动与关闭</td></tr>
+          <tr data-layer="app"><td><code>src/app/passes.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">每 2 秒或按命令运行一轮：到期副作用，然后 evaluateDue</td></tr>
+          <tr data-layer="app"><td><code>src/app/outbox.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">回执的唯一写入者；send 入队 reply，处理顺序、重试与丢弃</td></tr>
+          <tr data-layer="app"><td><code>src/app/effects.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">持久副作用队列；按 kind/key 合并，提交后执行，退避重试</td></tr>
+          <tr data-layer="app"><td><code>src/app/store.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">单一 SQLite：域仓储、只读查询、设置、回执与 KV</td></tr>
+          <tr data-layer="app"><td><code>src/app/store-read.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">面板、工具与 Source 轮询使用的只读查询，从不写入</td></tr>
+          <tr data-layer="app"><td><code>src/app/settings.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">版本化设置块；Policy 版本变化与受影响工单通知</td></tr>
+          <tr data-layer="app"><td><code>src/app/prompts.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">内置提示部件、团队覆盖、校验、预览与版本</td></tr>
+          <tr data-layer="app"><td><code>src/app/assessment.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">MasterAssessor：评估上下文、读取与决策提交</td></tr>
+          <tr data-layer="app"><td><code>src/app/sessions.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">两种角色的 DSH Session：创建、提示、转达、通知与工具注册</td></tr>
+          <tr data-layer="app"><td><code>src/app/notices.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">领域事件与 worker 活动转成主 Session 的通知和转达</td></tr>
+          <tr data-layer="app"><td><code>src/app/http.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">/orchestrator/api 路由；同源检查、请求限制与失败状态</td></tr>
+          <tr data-layer="app"><td><code>src/app/api.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">每个路由的类型；只导入类型，可被面板打包</td></tr>
+          <tr data-layer="app"><td><code>src/app/tools/main.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">主 Session 的 14 个路由、研判、回复与配置工具</td></tr>
+          <tr data-layer="app"><td><code>src/app/tools/executor.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">Executor Session 的 6 个读取、确认、报告与交回工具</td></tr>
+          <tr data-layer="app"><td><code>src/app/views/overview.ts</code></td><td><span class="layer-pill">app</span></td><td class="desc">概览视图：待人工、问题、24 小时流量与执行器负载</td></tr>
+          <tr data-layer="executor"><td><code>src/executor/dsh.ts</code></td><td><span class="layer-pill">executor</span></td><td class="desc">DshExecutor：每工单 Session 与目录，启动、投递、恢复</td></tr>
+          <tr data-layer="executor"><td><code>src/executor/background.ts</code></td><td><span class="layer-pill">executor</span></td><td class="desc">worker 的后台作业与 subagent：等待、收集、取消</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/registry.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">SourceRegistry：kind 与实例、校验、Channel 与 Thread 上下文</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/kind.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">SourceKind 协议：身份、配置、事实、健康与可选行为</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/github.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">GitHub kind 与插件入口：通知、PR、CI 与订阅 Thread 的轮询</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/feishu.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">Feishu kind 与插件入口：事件、历史恢复与话题轮询</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/poll.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">GitHub 与 Feishu 共享的轮询窗口、游标与错误保留</td></tr>
+          <tr data-layer="sources"><td><code>src/sources/admission-context.ts</code></td><td><span class="layer-pill">sources</span></td><td class="desc">评估起点：Thread 首页与 Trigger 前后消息组成的有界窗口</td></tr>
+          <tr data-layer="infra"><td><code>src/infra/commands.ts</code></td><td><span class="layer-pill">infra</span></td><td class="desc">CLI 传输：限定仓库的 gh、bot 身份的 lark-cli、git</td></tr>
+          <tr data-layer="infra"><td><code>src/infra/environment.ts</code></td><td><span class="layer-pill">infra</span></td><td class="desc">worker 的进程环境、命令 shim、git 配置与目录检查</td></tr>
+          <tr data-layer="infra"><td><code>src/infra/health.ts</code></td><td><span class="layer-pill">infra</span></td><td class="desc">HealthBoard：每个部件的健康项，每个只能被一个写入者认领</td></tr>
+          <tr data-layer="client"><td><code>src/client/app.tsx</code></td><td><span class="layer-pill">client</span></td><td class="desc">面板：页头、搜索、术语表、标签页与当前路由页面</td></tr>
+          <tr data-layer="client"><td><code>src/client/overview.tsx</code></td><td><span class="layer-pill">client</span></td><td class="desc">概览页：先列等待人的事项，健康时不占空间</td></tr>
+          <tr data-layer="client"><td><code>src/client/ticket.tsx</code></td><td><span class="layer-pill">client</span></td><td class="desc">工单页：授权依据、Input、Assignment 与报告</td></tr>
+          <tr data-layer="client"><td><code>src/client/locales.ts</code></td><td><span class="layer-pill">client</span></td><td class="desc">双语文案与术语表；面板一次只显示一种语言</td></tr>
+          <tr data-layer="deploy"><td><code>src/deployment.ts</code></td><td><span class="layer-pill">deploy</span></td><td class="desc">插件 Config / Machine 与部署解析；不写死任何账号或组织</td></tr>
+          <tr data-layer="deploy"><td><code>src/setup.ts</code></td><td><span class="layer-pill">deploy</span></td><td class="desc">启动检查：SetupError 代码、修复位置与共享英文文案</td></tr>
+          <tr data-layer="deploy"><td><code>src/admission.ts</code></td><td><span class="layer-pill">deploy</span></td><td class="desc">admission table 的取值、每格选项与默认值，与面板共享</td></tr>
+          <tr data-layer="deploy"><td><code>src/limits.ts</code></td><td><span class="layer-pill">deploy</span></td><td class="desc">设置取值的限制；schema 校验与面板字段共用</td></tr>
+          <tr data-layer="deploy"><td><code>src/kv.ts</code></td><td><span class="layer-pill">deploy</span></td><td class="desc">所有 KV 记录族的 key、类型与所有者</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="rules">
+      <div class="rule-card reveal"><svg class="icon" aria-hidden="true"><use href="#i-lock"/></svg><b>核心不做 I/O</b><span>src/core 只导入自身与 Node 哈希；外部边界由端口表达。</span></div>
+      <div class="rule-card reveal"><svg class="icon" aria-hidden="true"><use href="#i-shield"/></svg><b>单一写入者</b><span>每类状态只有一个写入者，其余读取或请求它写入。</span></div>
+      <div class="rule-card reveal"><svg class="icon" aria-hidden="true"><use href="#i-layers"/></svg><b>窄接口</b><span>依赖用 Pick 类型显式命名；Runtime 只以接口身份传入。</span></div>
+      <div class="rule-card reveal"><svg class="icon" aria-hidden="true"><use href="#i-trigger"/></svg><b>请求与事实</b><span>请求用祈使动词并可能被拒绝；事实用过去式记录已发生。</span></div>
+      <div class="rule-card reveal"><svg class="icon" aria-hidden="true"><use href="#i-outbox"/></svg><b>先存储，后执行</b><span>副作用在事务内入队，提交后才真正发送或启动。</span></div>
+    </div>
+  </section>
+
+  <section class="section wrap" id="glossary">
+    <div class="section-head reveal">
+      <div class="section-num">06 / GLOSSARY</div>
+      <div>
+        <h2>术语表</h2>
+        <p>代码、工具、面板与文档共用这些词。发给人的 GitHub 评论与 Feishu 消息使用日常语言，而不是这里的术语。</p>
+      </div>
+    </div>
+
+    <div class="filter-bar">
+      <div class="search-box">
+        <svg class="icon" aria-hidden="true"><use href="#i-search"/></svg>
+        <input id="glossary-search" type="search" placeholder="搜索术语、中文或含义…" aria-label="搜索术语">
+      </div>
+      <span class="result-count" id="glossary-count" aria-live="polite"></span>
+    </div>
+
+    <div class="table-wrap reveal">
+      <table class="glossary-table">
+        <thead><tr><th scope="col">Term</th><th scope="col">中文</th><th scope="col">Meaning</th></tr></thead>
+        <tbody id="glossary-rows">
+          <tr><td class="term">Agent</td><td class="cn">智能体</td><td class="meaning">通过 GitHub 账号、Feishu bot 等身份在 Source 上行动的自动化团队成员。</td></tr>
+          <tr><td class="term">Main Session</td><td class="cn">主 Session</td><td class="meaning">评估 Trigger、接受与派发工单并回复的 DSH Session；代码与提示中称 orchestrator。</td></tr>
+          <tr><td class="term">Executor Session</td><td class="cn">执行器 Session</td><td class="meaning">每张工单一个的 DSH Session；代码与提示中称 worker。</td></tr>
+          <tr><td class="term">Source</td><td class="cn">来源</td><td class="meaning">事件流：一种 kind 加一份实例配置。</td></tr>
+          <tr><td class="term">Trigger</td><td class="cn">触发</td><td class="meaning">Source 产生的一个不可变事件。</td></tr>
+          <tr><td class="term">Thread</td><td class="cn">线程</td><td class="meaning">按时间排列的 Trigger；Eval 在其中一次只运行一个。</td></tr>
+          <tr><td class="term">Correlation</td><td class="cn">关联</td><td class="meaning">共享同一 Trigger 的 Thread 之间的关系；只添加上下文。</td></tr>
+          <tr><td class="term">Channel</td><td class="cn">渠道</td><td class="meaning">Thread 的写侧。</td></tr>
+          <tr><td class="term">Policy</td><td class="cn">策略</td><td class="meaning">版本化的接受规则，以及每个 Source 的部分，例如谁可以请求工作。</td></tr>
+          <tr><td class="term">Policy version</td><td class="cn">策略版本</td><td class="meaning">规则、Source 部分与 accept mode 的某个组合标识；每个 Mandate 都记录它。</td></tr>
+          <tr><td class="term">Eval</td><td class="cn">评估</td><td class="meaning">把一批 Trigger 变成一个 Decision 的过程。</td></tr>
+          <tr><td class="term">Gate</td><td class="cn">准入</td><td class="meaning">Eval 的确定性第一层：谁可以发起工作，强度如何。</td></tr>
+          <tr><td class="term">Assessment</td><td class="cn">研判</td><td class="meaning">Eval 中模型做出的判断。</td></tr>
+          <tr><td class="term">Decision</td><td class="cn">决定</td><td class="meaning">Eval 的结果：accept、stop、ignore 或 unavailable。</td></tr>
+          <tr><td class="term">Mandate</td><td class="cn">授权</td><td class="meaning">接受所授予的内容：强度、范围与依据的 Policy 版本。</td></tr>
+          <tr><td class="term">Ticket</td><td class="cn">工单</td><td class="meaning">授权工作的单位。</td></tr>
+          <tr><td class="term">Assignment</td><td class="cn">派工</td><td class="meaning">工单与一个执行器实例的绑定。</td></tr>
+          <tr><td class="term">Subscription</td><td class="cn">订阅</td><td class="meaning">工单与 Thread 之间的关系。</td></tr>
+          <tr><td class="term">Fan-out</td><td class="cn">扇出</td><td class="meaning">把订阅 Thread 上的 Trigger 作为上下文送达工单。</td></tr>
+          <tr><td class="term">Executor</td><td class="cn">执行器</td><td class="meaning">运行 Assignment 的端口：每工单一个 Session 和一个目录。</td></tr>
+          <tr><td class="term">Execution environment</td><td class="cn">执行环境</td><td class="meaning">Executor Session 与 prepare 命令运行的上下文；变量各有 key、value 与描述。</td></tr>
+          <tr><td class="term">Report</td><td class="cn">报告</td><td class="meaning">Assignment 报告给工单的状态。</td></tr>
+          <tr><td class="term">Attention</td><td class="cn">待人工决定</td><td class="meaning">工单上等待人回答的问题。</td></tr>
+          <tr><td class="term">Disposition</td><td class="cn">去向</td><td class="meaning">记录一个 Trigger 被过滤、评估或扇出的结果。</td></tr>
+          <tr><td class="term">Input</td><td class="cn">输入</td><td class="meaning">送达工单的上下文：扇出的 Trigger、Policy 变更、恢复与文本。</td></tr>
+          <tr><td class="term">Scope</td><td class="cn">范围</td><td class="meaning">Mandate 允许的工作。</td></tr>
+          <tr><td class="term">Strength</td><td class="cn">强度</td><td class="meaning">Mandate 或 Eval 依据的强度：explicit 或 inferred。</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="value-groups">
+      <div class="value-group"><b>Decision</b><span>accept 接单 · stop 停止<br>ignore 忽略 · unavailable 未完成</span></div>
+      <div class="value-group"><b>Strength</b><span>explicit 明确<br>inferred 推断</span></div>
+      <div class="value-group"><b>Assignment</b><span>pending 待启动 · running 执行中<br>ended 已结束</span></div>
+      <div class="value-group"><b>Report</b><span>progress · waiting · ready<br>blocked · failed · dropped</span></div>
+    </div>
+  </section>
+</main>
+
+<footer class="site-footer wrap">
+  <div class="footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="#top" aria-label="回到顶部">
+        <span class="brand-mark"><svg class="icon icon-lg" aria-hidden="true"><use href="#i-hex"/></svg></span>
+        <span class="brand-text"><b>dsh-superagent</b><small>architecture overview</small></span>
+      </a>
+      <p>本页是仓库文档的可视化摘要。权威内容按顺序阅读 docs/000–008；实现细节以 007 Architecture 为准。</p>
+    </div>
+    <nav class="footer-links" aria-label="架构文档">
+      <a href="000-philosophy.md">000 Philosophy</a>
+      <a href="001-domain.md">001 Domain model</a>
+      <a href="002-authorization.md">002 Authorization</a>
+      <a href="003-execution.md">003 Execution</a>
+      <a href="004-prompts.md">004 Prompts</a>
+      <a href="005-panel.md">005 Panel</a>
+      <a href="006-deployment.md">006 Deployment</a>
+      <a href="007-architecture.md">007 Architecture</a>
+      <a href="008-cookbook.md">008 Cookbook</a>
+    </nav>
+  </div>
+  <div class="footer-meta">
+    <span>DSH-SUPERAGENT · STATIC OVERVIEW</span>
+    <span>无外部依赖 · 支持浅色 / 深色 · 可直接离线打开</span>
+  </div>
+</footer>
+
+<div class="scrim" id="scrim" hidden></div>
+<aside class="inspector" id="inspector" role="dialog" aria-modal="true" aria-labelledby="inspector-title" hidden>
+  <button class="inspector-close" id="inspector-close" type="button" aria-label="关闭详情">
+    <svg class="icon" aria-hidden="true"><use href="#i-close"/></svg>
+  </button>
+  <div id="inspector-content"></div>
+</aside>
+
+<script>
+(function () {
+  "use strict";
+
+  var root = document.documentElement;
+
+  /* ---------------- theme ---------------- */
+  var themeToggle = document.getElementById("theme-toggle");
+  if (themeToggle) {
+    themeToggle.addEventListener("click", function () {
+      var next = root.getAttribute("data-theme") === "dark" ? "light" : "dark";
+      root.setAttribute("data-theme", next);
+      try { localStorage.setItem("dsh-arch-theme", next); } catch (e) { /* ignore */ }
+    });
+  }
+
+  /* ---------------- details ---------------- */
+  var DETAILS = {
+    "feishu": {
+      kicker: "Source · 接入层",
+      title: "Feishu Source",
+      subtitle: "把群聊与话题消息读成 Trigger",
+      body: "可选来源。以机器人身份通过 lark-cli 读取实时事件、补历史消息，并轮询仍在订阅中的话题；机器人自己的消息在进入领域前就被丢弃。",
+      sections: [
+        { h: "职责", items: ["实时事件消费与历史恢复", "订阅话题与相关 Thread 的轮询", "把消息翻译成 Trigger、Thread 与回复地址", "读取消息中的图片，作为评估上下文"] },
+        { h: "边界", items: ["只写自己的读取位置与 Thread meta", "通过 SourceContext 的 bindThread / threadClosed 修改工单，不直接写 Ticket"] }
+      ],
+      tags: ["lark-cli", "bot 身份", "可选来源"],
+      path: "src/sources/feishu*.ts"
+    },
+    "github": {
+      kicker: "Source · 接入层",
+      title: "GitHub Source",
+      subtitle: "面向单个仓库的事件与 PR 跟踪",
+      body: "轮询通知、开放工单的 PR 与 CI、订阅的 Thread；开启 receive-all 时也接收仓库内所有新 Issue、PR、评论与默认分支 CI。",
+      sections: [
+        { h: "职责", items: ["通知、评论、review 与 CI 变化 → Trigger", "跟踪工单打开的 PR，并上报关闭与合并", "提供 review thread 上下文与回复", "读取 github/ 原始记录与提交检查"] },
+        { h: "边界", items: ["gh 只以 agent 账号运行，并限制在配置的仓库", "合并由人或指定的 merge CLI 完成，agent 不自行合入"] }
+      ],
+      tags: ["gh", "单一仓库", "PR 跟踪"],
+      path: "src/sources/github*.ts"
+    },
+    "registry": {
+      kicker: "Source · 接入层",
+      title: "SourceRegistry",
+      subtitle: "kind 与实例的唯一注册处",
+      body: "拥有已注册的 Source kind 与存储的实例，并实现 Engine 需要的 SourceScope。注册会认领 HealthBoard 上的健康项；重复认领和保留的 sync: 名称会被拒绝。",
+      sections: [
+        { h: "职责", items: ["列举与校验 kind、实例与配置", "统一 scope、channel、find 与 policyPart", "收拢各 Source 的 execution environment 声明", "向插件提供 SourceHost"] },
+        { h: "边界", items: ["无效的存储配置会禁用该实例，而不是让整个进程失败", "取消注册后的 Context 写入不会产生效果"] }
+      ],
+      tags: ["scope", "健康项", "插件入口"],
+      path: "src/sources/registry.ts"
+    },
+    "source-context": {
+      kicker: "Source · 接入层",
+      title: "SourceContext",
+      subtitle: "插件能看见的最小写入口",
+      body: "由 sourceContextOf 构造，交给一个 Source kind。它把部署信息、命令、配置、原子操作与类型化 state 暴露给插件，同时限制插件只能触碰自己的数据。",
+      sections: [
+        { h: "职责", items: ["receive、atomic 与 typed state", "Thread 读取、meta 写入与上下文读取", "工单读取、bindThread 与 threadClosed", "通过 Outbox notify，并上报声明的健康项"] },
+        { h: "边界", items: ["只能通过注册时认领的条目写健康", "不能直接改工单状态或写其他 Source 的读取位置"] }
+      ],
+      tags: ["最小接口", "插件边界"],
+      path: "src/app/source-context.ts"
+    },
+    "engine": {
+      kicker: "核心 · Engine",
+      title: "Engine",
+      subtitle: "Trigger、Thread、Decision、Ticket 与 Assignment 的唯一写入者",
+      body: "核心入口，委托给 Intake、Evals、Tickets、Assignments、Replies 五个内部部件。所有命令同步执行；每个命令在一个事务里改聚合，跨部件的命令按顺序调用。",
+      sections: [
+        { h: "职责", items: ["五个部件共享一组窄端口：Repositories、Policy、SourceScope、Assessor、Executor、Outbox", "用角色化接口限制调用者：Sources、Main Session、People、Settings、Executor", "领域事件在变更后发出：trigger.received、decision.recorded、ticket.ended 等", "无效请求抛 UserError"] },
+        { h: "边界", items: ["自己不做 I/O；外部工作由端口在事务内入队，提交后由适配器执行", "批次、授权、扇出、恢复与 attention 生命周期规则保持私有", "请求用祈使动词，适配器事实用过去式"] }
+      ],
+      tags: ["单一写入者", "事务", "领域事件"],
+      path: "src/core/engine.ts"
+    },
+    "intake": {
+      kicker: "核心 · Engine 部件",
+      title: "Intake",
+      subtitle: "每个 Source 事件的入口",
+      body: "接收 Source 的 Trigger：只存一次并记录去向，记到所属 Thread 与关联上，扇出给订阅的工单；除非它是已经到达某个工单的人的消息，否则排队进入 Eval。",
+      sections: [
+        { h: "职责", items: ["Trigger 幂等存储：stored / duplicate / filtered", "记录 disposition、Thread 顺序与关联", "向订阅工单扇出上下文", "在主要 Thread 上排队评估"] },
+        { h: "边界", items: ["人的消息若已到达工单，就留在那张工单，不再进入 Eval", "去重与重放安全由这里保证"] }
+      ],
+      tags: ["幂等", "扇出", "disposition"],
+      path: "src/core/intake.ts"
+    },
+    "evals": {
+      kicker: "核心 · Engine 部件",
+      title: "Evals",
+      subtitle: "Thread 上的授权判断",
+      body: "管理每条 Thread 的 Eval：批次、Gate 强度、actor 与依据、候选送达后的截止时间、暂停对截止时间的平移、过期重排、Policy 变更重排，以及最终 Decision。",
+      sections: [
+        { h: "职责", items: ["一次只运行一个 Eval，期间到达的 Trigger 合并进下一批", "候选未送达主 Session 时不会过期", "连续两次过期后，第三次记录 unavailable", "Policy 变更丢弃运行中的 Eval 并重新排队"] },
+        { h: "边界", items: ["Eval 自己不等待；需要等待的条件属于 Source", "接受推断工作前会再次对照当前 Policy"] }
+      ],
+      tags: ["批次", "Gate", "超时"],
+      path: "src/core/evals.ts"
+    },
+    "tickets": {
+      kicker: "核心 · Engine 部件",
+      title: "Tickets",
+      subtitle: "授权工作的生命周期",
+      body: "从 accept 创建 Ticket 与 Mandate、订阅和首个 Assignment 开始，管理它跟踪的 Thread、Input 与备注、恢复与拒绝恢复、retry、restart、stop 与结束，以及 Policy 变更通知。",
+      sections: [
+        { h: "职责", items: ["工单创建：Mandate、Subscriptions、首个 Assignment", "跟踪 PR；Thread 关闭后按 followsDone 结束", "人的消息恢复已结束工单", "解除无关订阅并交回其 follow-up"] },
+        { h: "边界", items: ["只有 Eval 能创建工单", "Policy 变更只通知受影响的在线工单，不取消工作", "Ticket 定义自己的状态，不跟随 Session"] }
+      ],
+      tags: ["Mandate", "follows", "resume"],
+      path: "src/core/tickets.ts"
+    },
+    "assignments": {
+      kicker: "核心 · Engine 部件",
+      title: "Assignments",
+      subtitle: "执行器报告的事实",
+      body: "记录执行器与 worker 带来的事实：Assignment 启动、Input 到达或投递失败、重启中断，以及带结构化问题的 Report。",
+      sections: [
+        { h: "职责", items: ["assignmentStarted 后投递等待中的 Input", "记录 inputsDelivered、inputsRead 与 turnEnded", "记录 deliveryFailed，直到成功、新 Assignment 或工单结束", "报告 dropped 结束工单；ready 在特定条件下完成工单"] },
+        { h: "边界", items: ["报告关注结构化事实，不靠自由文本推断“在等人”", "只有最终报告能从执行器一侧结束工单"] }
+      ],
+      tags: ["Report", "Input", "恢复"],
+      path: "src/core/assignments.ts"
+    },
+    "replies": {
+      kicker: "核心 · Engine 部件",
+      title: "Replies",
+      subtitle: "四种朝向人的写入",
+      body: "通过 Outbox 写 Channel，每一种都按自己的规则获得许可：确认、回答、结果与待人工决定的问题。",
+      sections: [
+        { h: "职责", items: ["acknowledgement：确认收到请求", "answer：回答人的问题", "result：交付可供评审或使用的结果", "attention：提出一个结构化问题"] },
+        { h: "边界", items: ["确认不超过 100 词（Feishu 消息受更严格字数限制）", "结果要求工单就绪；回答必须引用原始问题", "不把进度包装成回答来绕过规则"] }
+      ],
+      tags: ["ack", "result", "attention"],
+      path: "src/core/replies.ts"
+    },
+    "policy": {
+      kicker: "核心 · Policy",
+      title: "Policy",
+      subtitle: "版本化的规则与准入",
+      body: "定义设置 schema、授权与评估规则。settingsPolicy 每次返回一个新的无状态 Policy：gate、revalidate、admitsInferred，以及版本、暂停与评估超时。",
+      sections: [
+        { h: "职责", items: ["Gate：从 Trigger、Thread 与工单给出强度与依据", "Revalidate：恢复前检查 Mandate 是否仍成立", "assessmentOutcome：把模型判断转换成 Engine 结果", "policyEffects：算出变更影响哪些在线工单"] },
+        { h: "边界", items: ["版本覆盖规则、accept mode 与各 Source 的 Policy 部分", "变更不立即撤销 Mandate", "不同 Source 上的身份从不互相映射"] }
+      ],
+      tags: ["version", "gate", "revalidate"],
+      path: "src/policy.ts"
+    },
+    "store": {
+      kicker: "核心 · Store",
+      title: "Store",
+      subtitle: "一个 SQLite 数据库",
+      body: "Runtime 先取得目录锁再打开 Store，防止第二个进程迁移或写入同一份状态。域仓储、只读查询、设置、回执与 KV 都从这里读取。",
+      sections: [
+        { h: "职责", items: ["域仓储：triggers、threads、tickets、decisions", "只读查询服务视图、工具与 Source 轮询", "设置版本、prompt 版本与 outbox 回执", "schema 11 迁移在启动时转换旧记录"] },
+        { h: "边界", items: ["生成列与索引让 pass 只读活跃工作", "afterCommit 只在提交后运行，回滚后绝不运行", "只增不减的 schema：更新版本会拒绝启动"] }
+      ],
+      tags: ["SQLite", "schema 11", "目录锁"],
+      path: "src/app/store.ts"
+    },
+    "main-session": {
+      kicker: "智能 · Main Session",
+      title: "Main Session",
+      subtitle: "编排、研判与回复",
+      body: "router preset 下的 DSH Session，代码与提示中称 orchestrator。它评估候选、做路由决策、回复人、配置系统，并在工单与执行器之间转达。",
+      sections: [
+        { h: "职责", items: ["14 个应用工具：读取与路由、管理工单、重评估、主动研判、沟通与配置", "orchestrator_route 一次接受 1–20 个有序决策", "orchestrator_eval 提供有界上下文，而不是指令", "通知与候选在 turn 的下一步被送入"] },
+        { h: "边界", items: ["不读代码是提示规则，不是工具限制", "noWait 守卫：主 Session 不能 sleep 或长等待，报告会自动到达", "人手上的 follow-up 未决时，只能执行 stop"] }
+      ],
+      tags: ["orchestrator", "router preset", "14 tools"],
+      path: "src/app/sessions.ts · src/app/tools/main.ts"
+    },
+    "assessor": {
+      kicker: "智能 · Assessment",
+      title: "MasterAssessor",
+      subtitle: "主动候选的模型研判",
+      body: "让主 Session 研判主动候选。request 入队 assessment 效果；release 在 Eval 结束时清掉缓存。context、read、decide 分别服务三个评估工具。",
+      sections: [
+        { h: "职责", items: ["通过 SourceRegistry.threadContext 提供有界 Thread 上下文", "返回 Trigger 文本、相关工单、Policy 版本与消息窗口", "把模型的答案交给 assessmentOutcome 校验", "没有上下文读取器的 Source 只提供 Trigger 与批次"] },
+        { h: "边界", items: ["推断接受会再次对照当前 Policy", "评估只添加研判，不授予权限"] }
+      ],
+      tags: ["assessment", "bounded context", "release"],
+      path: "src/app/assessment.ts"
+    },
+    "worker-session": {
+      kicker: "智能 · Worker Session",
+      title: "Worker Session",
+      subtitle: "在一张工单里实现与验证",
+      body: "每个工单一个 worker-<ticket id> Session 和一个独立目录。worker preset 保留文件、搜索、命令、job、web、skill、todo 与 subagent 工具。",
+      sections: [
+        { h: "职责", items: ["阅读任务与来源上下文，在工单范围内实现", "运行检查、自审、提交与推送", "打开 PR 并报告 ready", "用结构化问题请求人工决定，或报告 blocked / failed"] },
+        { h: "边界", items: ["上下文只来自自己的工单与 Thread", "工单结束后工具调用被拒绝", "前台命令 5 秒后转入后台，以便接收新消息"] }
+      ],
+      tags: ["worker", "6 tools", "独立目录"],
+      path: "src/executor/dsh.ts"
+    },
+    "prompts": {
+      kicker: "智能 · Prompts",
+      title: "Prompts",
+      subtitle: "团队可以改的行为文本",
+      body: "把提示配置保存为版本。内置部件带默认文本与保留的模板占位符；团队覆盖保留其默认版本的引用，默认变化会被报告。",
+      sections: [
+        { h: "职责", items: ["current、version 与 history 读取", "validate、preview 与 save 校验并保存", "compose 与 skills 组装 Session 文本", "每次模型请求绑定当前的 prompt revision"] },
+        { h: "边界", items: ["内置规则不能被空文本覆盖", "保存可选择 preview，只组合不落盘", "旧配置只有在存在时才继承 base"] }
+      ],
+      tags: ["版本", "override", "prompt revision"],
+      path: "src/app/prompts.ts"
+    },
+    "skills": {
+      kicker: "智能 · Skills",
+      title: "Skills",
+      subtitle: "按需加载的操作手册",
+      body: "GitHub 与 Feishu 的读取、评审与消息操作写在打包的 SKILL.md 中。模型在需要时加载，避免把完整操作细节塞进系统提示。",
+      sections: [
+        { h: "职责", items: ["说明如何用 gh 读取 Issue、PR、review 与 CI", "说明如何用 lark-cli 以 bot 身份读消息与文档", "约定回复、解决 thread 与记录证据的方式"] },
+        { h: "边界", items: ["技能不授权行动；授权来自请求与 Policy", "不把私有 Feishu 内容复制到 GitHub"] }
+      ],
+      tags: ["SKILL.md", "按需加载"],
+      path: "skills/dsh-superagent-*/SKILL.md"
+    },
+    "executor": {
+      kicker: "执行 · Executor",
+      title: "DshExecutor",
+      subtitle: "每张工单一个 Session 与目录",
+      body: "实现 Engine 的 Executor 端口。start 与 deliver 分别入队 launch 与 delivery 效果；prepare 提供目录与任务文本；workerSessionId 从工单 id 派生。",
+      sections: [
+        { h: "职责", items: ["launch：prepare 命令、创建 Session、发送 assignment 消息", "delivery：按顺序把等待的 Input 交给运行中的 Assignment", "transient 的模型与网络失败重试三次", "启动时恢复被中断的 Assignment 并重排待启动项"] },
+        { h: "边界", items: ["stop 通过 afterCommit 取消 turn，回滚不会停 worker", "turn 正常结束默认报告 waiting", "准备失败会让工单失败并记录输出"] }
+      ],
+      tags: ["launch", "delivery", "resume"],
+      path: "src/executor/dsh.ts"
+    },
+    "slots": {
+      kicker: "执行 · Concurrency",
+      title: "WorkerSlots",
+      subtitle: "并发预算",
+      body: "在启动或唤醒空闲 worker 之前先占槽。人的消息与状态请求可以在 maxWorkers 之外多用一槽；唤醒优先于新的启动。",
+      sections: [
+        { h: "职责", items: ["为新 launch 与唤醒的 delivery 预留容量", "人的消息可越过常规上限", "activeCount 供面板展示负载", "满载时以 Later 延后，而不算一次失败"] },
+        { h: "边界", items: ["新工作不能挡住人继续已有工单", "其他 Input 等待常规槽位"] }
+      ],
+      tags: ["并发", "额外槽", "wake 优先"],
+      path: "src/executor/dsh.ts"
+    },
+    "effects": {
+      kicker: "执行 · Reliability",
+      title: "Effects",
+      subtitle: "持久副作用队列",
+      body: "命令在事务内 enqueue，提交后才开始执行。每个 kind/key 一行；重复入队相同的等待 key 会替换 payload，并立即到期而不改变队列顺序。",
+      sections: [
+        { h: "职责", items: ["六种 kind：assessment、launch、delivery、relay、notice、reply", "按 oldest first 处理，受并发上限约束", "指数退避重试；抛 Later 延后但不计失败", "start 启动、drain 关闭时保留未完成行"] },
+        { h: "边界", items: ["每种 kind 一个健康项，三次连续失败才报错", "delivery 的失败留在工单上，而不是健康项", "relay 与 notice 保序，失败会挡住后面的同类"] }
+      ],
+      tags: ["durable queue", "backoff", "coalescing"],
+      path: "src/app/effects.ts"
+    },
+    "outbox": {
+      kicker: "执行 · Outbox",
+      title: "Outbox",
+      subtitle: "消息回执与有序发送",
+      body: "Engine 的 Outbox 端口，也是回执的唯一写入者。send 在同一事务里保存回执并入队 reply 效果；效果处理器再通过 SourceRegistry.send 发送。",
+      sections: [
+        { h: "职责", items: ["同一工单、同一会话的消息保序", "Source 关闭时等待；会话消失或不再监听时丢弃", "失败退避从 5 秒翻倍至 300 秒", "撤回消息并记录 channelGone / channelIgnored"] },
+        { h: "边界", items: ["丢弃的消息保留记录，永远不会再次入队", "确认最多 100 词；Feishu 还受聊天消息字数限制", "不同工单或无工单的消息不互相等待"] }
+      ],
+      tags: ["receipt", "ordering", "drop"],
+      path: "src/app/outbox.ts"
+    },
+    "channels": {
+      kicker: "执行 · Channels",
+      title: "Channels",
+      subtitle: "把结果写回对话",
+      body: "每个 Source kind 定义自己的写侧：Feishu 话题回复，GitHub Issue 评论与 review thread 回复。统一返回 sent、gone 或 waiting。",
+      sections: [
+        { h: "职责", items: ["解析回复地址与链接", "以对应身份发送，并返回可恢复的状态", "review thread 已不存在时退回到 PR 会话", "Feishu 使用 Markdown 转富文本的传输方式"] },
+        { h: "边界", items: ["Source 不监听该会话时丢弃", "消息失败是系统问题，直到发出或撤回"] }
+      ],
+      tags: ["reply", "link", "gone"],
+      path: "src/sources/*-channel.ts"
+    },
+    "runtime": {
+      kicker: "运行 · Composition",
+      title: "Runtime",
+      subtitle: "组合根",
+      body: "构建整个应用：锁住状态目录、打开 Store、用各自需要的接口构建组件。它自身不含领域规则，只负责装配与生命周期。",
+      sections: [
+        { h: "职责", items: ["启动：注册管理路由、运行 Setup、安装 hooks、确保主 Session、启动 Policy 同步、恢复中断的 Assignment、启动 passes 与 effects", "关闭：取消 turn，等待 passes / effects / agents，恢复环境，关闭 Store 并释放锁", "通过 SourceHost 把 Runtime 注入 Source 插件", "把领域事件转成通知"] },
+        { h: "边界", items: ["构造失败时关闭 Store 并释放锁", "组件通过窄接口拿到 Runtime，而不是整体"] }
+      ],
+      tags: ["composition root", "startup", "shutdown"],
+      path: "src/app/runtime.ts"
+    },
+    "passes": {
+      kicker: "运行 · Scheduler",
+      title: "Passes",
+      subtitle: "每两秒推进一次",
+      body: "一次只运行一轮，每两秒或收到命令时触发：先处理到期副作用，再调用 Engine.evaluateDue。Source 的 Trigger 也通过它到达 Engine。",
+      sections: [
+        { h: "职责", items: ["驱动到期 effects", "启动等待中 Thread 的 Eval，并把期间到达的 Trigger 合并成一批", "处理 Eval 过期与暂停后的恢复", "失败时向 runtime 健康项报告"] },
+        { h: "边界", items: ["暂停时没有 Eval 过期，恢复后截止时间整体后移", "一轮运行期间的新请求在下一轮执行"] }
+      ],
+      tags: ["2s", "pass", "evaluateDue"],
+      path: "src/app/passes.ts"
+    },
+    "settings": {
+      kicker: "运行 · Settings",
+      title: "Settings",
+      subtitle: "版本化的配置",
+      body: "读写带修订号的设置块。每次保存声明来源：panel、tool 或 sync；只有 panel 能修改执行环境与 Setup 读取的字段。",
+      sections: [
+        { h: "职责", items: ["current 与 view 读取，save 校验并保存", "pause 修改独立的暂停设置", "Policy 版本变化时计算 policyEffects 并通知 Engine", "sync 与 refreshLabels 刷新 Source 部分与显示名"] },
+        { h: "边界", items: ["设置历史保留每个版本及其变化", "账号字段变更会触发重启，由 Setup 再次检查"] }
+      ],
+      tags: ["revision", "origin", "policy sync"],
+      path: "src/app/settings.ts"
+    },
+    "panel": {
+      kicker: "运行 · Panel",
+      title: "Panel / API",
+      subtitle: "只显示需要人的事项",
+      body: "DSH 内的管理面板，加一层同源管理 API。概览先列等待人的工单与系统问题；健康状态不占空间；界面一次只显示一种语言。",
+      sections: [
+        { h: "职责", items: ["Overview、Source、Trigger、Eval、Execution 等阶段页", "Thread 与 Ticket 的记录页", "Settings 分组、Prompts 编辑与历史", "搜索、术语表与路由记忆"] },
+        { h: "边界", items: ["API 做同源与 loopback 检查、请求大小限制", "面板只导入类型与纯值，不导入宿主运行时", "没有工具的操作包括 dismiss、重跑 setup、刷新显示名"] }
+      ],
+      tags: ["React", "同源 API", "双语"],
+      path: "src/client/ · src/app/http.ts"
+    },
+    "health": {
+      kicker: "运行 · Health",
+      title: "HealthBoard",
+      subtitle: "每个部件一项健康",
+      body: "HealthBoard 收集每个部件的健康项，并拒绝第二次认领。Runtime、Passes、Sessions、Effects、DshExecutor、各 Source 与 Settings 各有自己的条目。",
+      sections: [
+        { h: "职责", items: ["为每个部件提供唯一的健康条目", "由它的唯一写入者更新", "连续三次失败后向概览报告", "状态命令读取同一份事实"] },
+        { h: "边界", items: ["delivery 的失败显示在工单上，不进入健康项", "任何成功都会清除对应错误"] }
+      ],
+      tags: ["single writer", "health", "status"],
+      path: "src/infra/health.ts"
+    }
+  };
+
+  /* ---------------- inspector ---------------- */
+  var inspector = document.getElementById("inspector");
+  var inspectorContent = document.getElementById("inspector-content");
+  var scrim = document.getElementById("scrim");
+  var closeBtn = document.getElementById("inspector-close");
+  var lastFocus = null;
+
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (ch) {
+      return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[ch];
+    });
+  }
+
+  function renderDetail(d) {
+    var html = '<p class="kicker">' + escapeHtml(d.kicker) + '</p>';
+    html += '<h2 id="inspector-title">' + escapeHtml(d.title) + '</h2>';
+    html += '<p class="sub">' + escapeHtml(d.subtitle) + '</p>';
+    html += '<p class="body">' + escapeHtml(d.body) + '</p>';
+    (d.sections || []).forEach(function (section) {
+      html += '<h3>' + escapeHtml(section.h) + '</h3><ul>';
+      section.items.forEach(function (item) { html += '<li>' + escapeHtml(item) + '</li>'; });
+      html += '</ul>';
+    });
+    html += '<div class="tags">';
+    (d.tags || []).forEach(function (tag) { html += '<span class="tag">' + escapeHtml(tag) + '</span>'; });
+    html += '</div>';
+    html += '<div class="path"><b>source</b>' + escapeHtml(d.path) + '</div>';
+    inspectorContent.innerHTML = html;
+  }
+
+  function openInspector(key, trigger) {
+    var d = DETAILS[key];
+    if (!d) { return; }
+    lastFocus = trigger || document.activeElement;
+    renderDetail(d);
+    inspector.hidden = false;
+    scrim.hidden = false;
+    document.body.classList.add("inspector-open");
+    closeBtn.focus();
+  }
+
+  function closeInspector() {
+    if (inspector.hidden) { return; }
+    inspector.hidden = true;
+    scrim.hidden = true;
+    document.body.classList.remove("inspector-open");
+    if (lastFocus && typeof lastFocus.focus === "function") { lastFocus.focus(); }
+    lastFocus = null;
+  }
+
+  document.addEventListener("click", function (event) {
+    var trigger = event.target.closest("[data-inspect]");
+    if (trigger) {
+      event.preventDefault();
+      openInspector(trigger.getAttribute("data-inspect"), trigger);
+    }
+  });
+  if (closeBtn) { closeBtn.addEventListener("click", closeInspector); }
+  if (scrim) { scrim.addEventListener("click", closeInspector); }
+  document.addEventListener("keydown", function (event) {
+    if (event.key === "Escape") { closeInspector(); }
+  });
+  if (inspector) {
+    inspector.addEventListener("keydown", function (event) {
+      if (event.key !== "Tab") { return; }
+      var focusable = inspector.querySelectorAll("button, [href], input, select, textarea, [tabindex]:not([tabindex='-1'])");
+      if (!focusable.length) { return; }
+      var first = focusable[0];
+      var last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+      else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+    });
+  }
+
+  /* ---------------- tabs ---------------- */
+  var tabs = Array.prototype.slice.call(document.querySelectorAll('[role="tab"]'));
+  var panels = Array.prototype.slice.call(document.querySelectorAll('[role="tabpanel"]'));
+  function selectTab(tab) {
+    tabs.forEach(function (item) {
+      var selected = item === tab;
+      item.setAttribute("aria-selected", selected ? "true" : "false");
+      item.tabIndex = selected ? 0 : -1;
+    });
+    panels.forEach(function (panel) {
+      var active = panel.id === tab.getAttribute("aria-controls");
+      panel.classList.toggle("is-active", active);
+      if (active) { panel.removeAttribute("hidden"); } else { panel.setAttribute("hidden", ""); }
+    });
+  }
+  tabs.forEach(function (tab, index) {
+    tab.addEventListener("click", function () { selectTab(tab); });
+    tab.addEventListener("keydown", function (event) {
+      var next = null;
+      if (event.key === "ArrowRight") { next = tabs[(index + 1) % tabs.length]; }
+      if (event.key === "ArrowLeft") { next = tabs[(index - 1 + tabs.length) % tabs.length]; }
+      if (event.key === "Home") { next = tabs[0]; }
+      if (event.key === "End") { next = tabs[tabs.length - 1]; }
+      if (next) { event.preventDefault(); selectTab(next); next.focus(); }
+    });
+  });
+  if (tabs.length) { selectTab(tabs[0]); }
+
+  /* ---------------- filters ---------------- */
+  function setupFilter(inputId, countId, selector) {
+    var input = document.getElementById(inputId);
+    var counter = document.getElementById(countId);
+    if (!input || !counter) { return; }
+    var rows = Array.prototype.slice.call(document.querySelectorAll(selector));
+    function apply() {
+      var query = input.value.trim().toLowerCase();
+      var shown = 0;
+      rows.forEach(function (row) {
+        var match = !query || row.textContent.toLowerCase().indexOf(query) !== -1;
+        row.hidden = !match;
+        if (match) { shown += 1; }
+      });
+      counter.textContent = shown + " / " + rows.length;
+    }
+    input.addEventListener("input", apply);
+    apply();
+  }
+  setupFilter("glossary-search", "glossary-count", "#glossary-rows tr");
+
+  var moduleInput = document.getElementById("module-search");
+  var moduleCount = document.getElementById("module-count");
+  var moduleRows = Array.prototype.slice.call(document.querySelectorAll("#module-rows tr"));
+  var chips = Array.prototype.slice.call(document.querySelectorAll(".chip[data-layer]"));
+  var activeLayer = "all";
+
+  function applyModuleFilter() {
+    if (!moduleInput || !moduleCount) { return; }
+    var query = moduleInput.value.trim().toLowerCase();
+    var shown = 0;
+    moduleRows.forEach(function (row) {
+      var layerMatch = activeLayer === "all" || row.getAttribute("data-layer") === activeLayer;
+      var textMatch = !query || row.textContent.toLowerCase().indexOf(query) !== -1;
+      var match = layerMatch && textMatch;
+      row.hidden = !match;
+      if (match) { shown += 1; }
+    });
+    moduleCount.textContent = shown + " / " + moduleRows.length;
+  }
+  if (moduleInput) { moduleInput.addEventListener("input", applyModuleFilter); }
+  chips.forEach(function (chip) {
+    chip.addEventListener("click", function () {
+      activeLayer = chip.getAttribute("data-layer");
+      chips.forEach(function (other) { other.setAttribute("aria-pressed", other === chip ? "true" : "false"); });
+      applyModuleFilter();
+    });
+  });
+  applyModuleFilter();
+
+  /* ---------------- scroll spy ---------------- */
+  var navLinks = Array.prototype.slice.call(document.querySelectorAll(".site-nav a"));
+  var sections = navLinks.map(function (link) {
+    var id = link.getAttribute("href").slice(1);
+    return document.getElementById(id);
+  }).filter(Boolean);
+
+  function updateActiveLink() {
+    var y = window.scrollY + 130;
+    var current = null;
+    sections.forEach(function (section) {
+      if (section.offsetTop <= y) { current = section.id; }
+    });
+    navLinks.forEach(function (link) {
+      link.classList.toggle("active", link.getAttribute("href") === "#" + current);
+    });
+  }
+  var ticking = false;
+  window.addEventListener("scroll", function () {
+    if (ticking) { return; }
+    ticking = true;
+    requestAnimationFrame(function () {
+      updateActiveLink();
+      ticking = false;
+    });
+  }, { passive: true });
+  updateActiveLink();
+
+})();
+</script>
+</body>
+</html>
